@@ -27,7 +27,7 @@ jobs:
           set +a
           export PARKING_INTEGRATION_TESTS=true TEST_DB_URL='jdbc:mysql://127.0.0.1:3307/parking_springboot?serverTimezone=Asia/Shanghai' TEST_REDIS_PORT=6380
           cd parking/parking
-          sh mvnw -B verify
+          sh ./mvnw -B verify
           cd ../..
           python3 scripts/test-migration.py
       - name: Frontend tests and build
