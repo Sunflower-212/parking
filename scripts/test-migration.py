@@ -2,9 +2,10 @@
 from pathlib import Path
 import subprocess
 import uuid
+import os
 
 root = Path(__file__).resolve().parents[1]
-command = ['docker', 'compose', 'exec', '-T', 'mysql', 'sh', '-c',
+command = ['docker', 'compose', '-p', os.environ.get('PARKING_COMPOSE_PROJECT','parking-verification'), 'exec', '-T', 'mysql', 'sh', '-c',
            'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec mysql -uroot --default-character-set=utf8mb4 --batch --skip-column-names']
 
 def sql(text, check=True):
@@ -15,6 +16,7 @@ def sql(text, check=True):
 
 schema = (root / 'database/init/001-schema.sql').read_text(encoding='utf-8')
 migration = (root / 'database/migrations/002-reservation-queue.sql').read_text(encoding='utf-8')
+performance = (root / 'database/migrations/003-performance-indexes.sql').read_text(encoding='utf-8')
 for ambiguous in (False, True):
     database = 'parking_migration_' + uuid.uuid4().hex[:12]
     try:
@@ -45,7 +47,17 @@ INSERT INTO enter(plate_num,user_id,park_id,enter_time,flag,reservation) VALUES(
             assert sql(f"USE {database}; SELECT CONCAT(space_id,':',active_user_id) FROM enter WHERE id=1;").stdout.strip() == '1:1'
             assert sql(f"USE {database}; SELECT COUNT(*) FROM reservation_event;").stdout.strip() == '1'
             sql(f'USE {database};\n' + migration)
+            sql(performance.replace('parking_springboot',database))
+            sql(performance.replace('parking_springboot',database))
+            assert sql(f"USE {database}; SELECT COUNT(*) FROM orders;").stdout.strip() == '0'
+            assert sql(f"USE {database}; SELECT COUNT(*) FROM enter;").stdout.strip() == '1'
+            assert sql(f"SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema='{database}' AND table_name='orders' AND index_name='idx_orders_user_time';").stdout.strip() == '3'
+            sql(f'USE {database}; ALTER TABLE orders RENAME INDEX idx_orders_user_time TO migration_equivalent_user_time;')
+            sql(performance.replace('parking_springboot',database))
+            assert sql(f"SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema='{database}' AND table_name='orders' AND index_name='idx_orders_user_time';").stdout.strip() == '0'
+            assert sql(f"SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema='{database}' AND table_name='orders' AND index_name='migration_equivalent_user_time';").stdout.strip() == '3'
             print('PASS: legacy data preserved, association and outbox backfilled, rerun succeeds')
+            print('PASS: equivalent index with a different name is reused')
     finally:
         # Generated name always stays within this script's disposable namespace.
         assert database.startswith('parking_migration_') and len(database) == 30

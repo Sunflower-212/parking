@@ -13,6 +13,8 @@ import java.util.Map;
 
 @Mapper
 public interface OrdersMapper {
+    @Select("select count(*) from orders where create_time>=#{from} and create_time<#{to}") int countToday(LocalDateTime from,LocalDateTime to);
+    @Select("select count(*) from orders where park_id=#{park} and create_time>=#{from} and create_time<#{to}") int countTodayPark(int park,LocalDateTime from,LocalDateTime to);
 
     @Insert("insert into orders(plate_num, user_id, park_id, enter_time, exit_time, parking_duration, moneys, create_time) " +
             "values (#{plateNumber},#{userId},#{parkId},#{enterTime},#{exitTime},#{parkingDuration},#{moneys},now())")

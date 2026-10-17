@@ -26,6 +26,7 @@ import org.zjmproject.service.AliPayService;
 import org.zjmproject.service.RechargesService;
 import org.zjmproject.service.UserService;
 import org.zjmproject.service.PaymentService;
+import org.zjmproject.service.MembershipService;
 import org.zjmproject.service.AccessGuard;
 import org.zjmproject.service.PlateUploadService;
 import org.zjmproject.utils.AliOssUtil;
@@ -46,6 +47,8 @@ import java.util.concurrent.TimeUnit;
 @Validated
 public class UserController {
     @Autowired private PaymentService payments;
+    @Autowired private MembershipService membership;
+    @Autowired private org.springframework.jdbc.core.JdbcTemplate db;
     @org.springframework.beans.factory.annotation.Value("${parking.integrations.oss:false}") private boolean ossEnabled;
     @Autowired
     private UserService userService;
@@ -214,7 +217,11 @@ public class UserController {
         String l_username =(String) map.get("username");
         Integer permissions = (Integer) map.get("permissions");
         if((l_username!=null && l_username.equals(user_name))||permissions!=-1){
+            int uid=userService.findByUserName(user_name).getId();
+            db.queryForObject("select id from user where id=? for update",Integer.class,uid);
+            if(Boolean.TRUE.equals(db.queryForObject("select exists(select 1 from enter where user_id=?) or exists(select 1 from orders where user_id=?) or exists(select 1 from recharges where user_id=?)",Boolean.class,uid,uid,uid))) return Result.error("该用户存在业务记录，无法删除");
             userService.deleteUser(user_name);
+            stringRedisTemplate.delete("user="+user_name);
             return Result.success();
         }
         return Result.error("非本人或者管理员，无法删除该用户");
@@ -252,49 +259,10 @@ public class UserController {
         return Result.error("权限错误");
     }
 
-    //开通vip
-    @Transactional
     @PatchMapping("/getVip")
-    public Result getVip(@RequestParam Integer days){
-        Map<String, Object> map = ThreadLocalUtil.get();
-        String username = (String) map.get("username");
-        User user = userService.findByUserName(username);
-        Integer status = user.getStatus();
-        Integer id =user.getId();
-        if(status==0){
-            if(days==null || days<=0 || days>3650) throw new IllegalArgumentException("会员天数需在1至3650之间");
-            userService.getVip(id,days);
-            return Result.success();
-        }
-        return Result.error("已经是会员");
-
-    }
-
-    //vip续费
-    @Transactional
+    public Result getVip(@RequestParam Integer days) {membership.change(AccessGuard.userId(),days,false);return Result.success();}
     @PatchMapping("/vipRenewal")
-    public Result vipRenewal(@RequestParam Integer days){
-        Map<String, Object> map = ThreadLocalUtil.get();
-        String username = (String) map.get("username");
-        User user = userService.findByUserName(username);
-        Integer id = user.getId();
-        Integer status = user.getStatus();
-        LocalDateTime vipStartTime = user.getVip_start_time();
-        LocalDateTime vipEndTime = user.getVip_end_time();
-        if(days==null || days<=0 || days>3650) throw new IllegalArgumentException("会员天数需在1至3650之间");
-        //正常续费
-        if(status==1&&vipStartTime!=null&&vipEndTime!=null){
-            userService.vipRenewal(id,days,vipEndTime);
-            return Result.success();
-        }
-        //开过会员，但续费时已经过期
-        if(status==0&&vipStartTime!=null&&vipEndTime!=null){
-            vipStartTime = LocalDateTime.now();
-            userService.newVipRenewal(id,days,vipStartTime,vipEndTime);
-            return Result.success();
-        }
-        return Result.error("数据异常，请咨询管理员");
-    }
+    public Result vipRenewal(@RequestParam Integer days) {membership.change(AccessGuard.userId(),days,true);return Result.success();}
 
     //充值
     @Transactional
@@ -330,24 +298,11 @@ public class UserController {
         return Result.success(url);
     }
 
+    @Transactional
     @PostMapping("/addUser")
-    public Result addUser(@RequestBody User user){
-        Map<String,Object>map = ThreadLocalUtil.get();
-        Integer permissions = (Integer) map.get("permissions");
-        if(permissions!=0&&permissions!=1){
-            return Result.error("权限错误");
-        }
-        //查询用户
-        User finduser = userService.findByUserName(user.getUser_name());
-        if (finduser == null) {
-            //注册
-            //用户名密码一致
-            userService.register(user.getUser_name(), user.getUser_name());
-            return Result.success();
-        } else {
-            //占用
-            return Result.error("用户名已占用,请换个用户名添加！");
-        }
+    public Result<?> addUser(@RequestBody @Validated CreateUserRequest user){
+        db.update("insert into user(user_name,password,name,plate_num,car_color,tel_num,create_time,update_time) values(?,?,?,nullif(?,''),?,nullif(?,''),now(),now())",user.user_name(),Md5Util.encode(user.user_name()),user.name()==null?"":user.name(),user.plate_num(),user.car_color()==null?"":user.car_color(),user.tel_num());
+        return Result.success();
     }
     /*
     * 批量导出用户
@@ -363,8 +318,8 @@ public class UserController {
         response.setHeader("Content-Disposition","attachment; filename=users.csv");
         var writer=response.getWriter();
         writer.write("\ufeff用户名,姓名,车牌,车辆颜色,手机号,会员状态\r\n");
-        for(int page=1;;page++) {
-            List<User> rows=userService.pageListFind(page,500,plate_num,car_color,status,user_name).getItems();
+        for(long after=0;;) {
+            List<User> rows=exportBatch(after,plate_num,car_color,status,user_name);
             for(User user:rows) {
                 String[] values={user.getUser_name(),user.getName(),user.getPlate_num(),user.getCar_color(),user.getTel_num(),Integer.toString(user.getStatus())};
                 for(int i=0;i<values.length;i++) {
@@ -376,8 +331,20 @@ public class UserController {
                 writer.write("\r\n");
             }
             if(rows.size()<500) break;
+            after=rows.get(rows.size()-1).getId();
         }
         writer.flush();
+    }
+
+    private List<User> exportBatch(long after,String plate,String color,Integer status,String name) {
+        StringBuilder sql=new StringBuilder("select id,user_name,name,plate_num,car_color,tel_num,status from user where id>?");
+        java.util.List<Object> args=new java.util.ArrayList<>();args.add(after);
+        if(plate!=null && !plate.isBlank()){sql.append(" and plate_num like ?");args.add("%"+plate+"%");}
+        if(color!=null && !color.isBlank()){sql.append(" and car_color like ?");args.add("%"+color+"%");}
+        if(status!=null){sql.append(" and status=?");args.add(status);}
+        if(name!=null && !name.isBlank()){sql.append(" and user_name like ?");args.add("%"+name+"%");}
+        sql.append(" order by id limit 500");
+        return db.query(sql.toString(),(r,n)->{User u=new User();u.setId(r.getInt("id"));u.setUser_name(r.getString("user_name"));u.setName(r.getString("name"));u.setPlate_num(r.getString("plate_num"));u.setCar_color(r.getString("car_color"));u.setTel_num(r.getString("tel_num"));u.setStatus(r.getInt("status"));return u;},args.toArray());
     }
 
     @GetMapping("/data")

@@ -18,12 +18,13 @@ import java.util.List;
 
 @Service
 public class RechargesServiceImpl implements RechargesService {
+    @Autowired private java.time.Clock clock;
     @Autowired
     private RechargesMapper rechargesMapper;
 
     @Override
     public void add(Recharges recharges) {
-        recharges.setCreate_time(LocalDateTime.now());
+        recharges.setCreate_time(LocalDateTime.now(clock));
         rechargesMapper.add(recharges);
     }
 
@@ -37,12 +38,12 @@ public class RechargesServiceImpl implements RechargesService {
         //创建pageBean对象
         PageBean<Recharges> pageBean = new PageBean<>();
         //开启分页查询 PageHelper
-        PageHelper.startPage(pageNum,pageSize);
+        org.zjmproject.utils.PageQuery.start(pageNum,pageSize);
         LocalDateTime startDateTime=null;
         LocalDateTime endDateTime=null;
         if(date!=null){
             startDateTime = LocalDateTime.of(date, LocalTime.of(0,0,0));
-            endDateTime = LocalDateTime.of(date,LocalTime.MAX);
+            endDateTime = date.plusDays(1).atStartOfDay();
         }
         List<Recharges> rechargesList = rechargesMapper.findRechargesByDate(amounts,startDateTime,endDateTime);
         //Page中提供了方法，可获取PageHelper分页查询后，得到的总记录条数和当前页数据
@@ -66,18 +67,13 @@ public class RechargesServiceImpl implements RechargesService {
 
     @Override
     public void checkAndUpdateRechargesFlag() {
-        List<Recharges> rechargesList = rechargesMapper.findRechargesByFlag(0);
-        for(Recharges recharges:rechargesList){
-            if(recharges.getCreate_time().plusMinutes(5).isBefore(LocalDateTime.now())){
-                rechargesMapper.cancelUnpaid(recharges.getId());
-            }
-        }
+        while(rechargesMapper.expireUnpaid(LocalDateTime.now(clock).minusMinutes(5))==500) { /* conditional batches preserve payment race safety */ }
     }
 
     @Override
     public List<Recharges> findRechargesListByDate(LocalDate localDate) {
         LocalDateTime startDateTime = localDate.atStartOfDay();
-        LocalDateTime endDateTime = localDate.atTime(LocalTime.MAX);
+        LocalDateTime endDateTime = localDate.plusDays(1).atStartOfDay();
         return rechargesMapper.findRechargesListByDate(startDateTime,endDateTime);
     }
 

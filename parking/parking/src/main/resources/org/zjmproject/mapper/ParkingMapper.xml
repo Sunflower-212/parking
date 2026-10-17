@@ -31,6 +31,7 @@
                 and rule_name like concat('%',#{ruleName},'%')
             </if>
         </where>
+    order by p.id desc
     </select>
     <select id="findParking" resultMap="parkingResultMap">
         select
@@ -57,6 +58,7 @@
             </if>
         and admin_id=#{adminId}
         </where>
+    order by p.id desc
     </select>
     <select id="findParkByParkName" resultMap="parkingResultMap">
         select
@@ -74,6 +76,7 @@
         <where>
             park_name=#{parkName}
         </where>
+    order by p.id desc
     </select>
     <select id="findParkById" resultMap="parkingResultMap">
         select
@@ -89,6 +92,7 @@
         left join
         rule r on p.rule_id = r.id
         where p.id =#{parkId}
+    order by p.id desc
     </select>
     <select id="getAdminNameByParkName" resultType="java.lang.String">
         select
@@ -97,6 +101,7 @@
         left join
             admin a on p.admin_id = a.id
         where p.park_name=#{parkName}
+    order by p.id desc
     </select>
     <resultMap id="parkingResultMap" type="org.zjmproject.pojo.Parking">
         <result property="id" column="id"/>

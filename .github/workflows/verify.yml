@@ -16,26 +16,37 @@ jobs:
           node-version: '22'
           cache: npm
           cache-dependency-path: vue3/parking-vue/package-lock.json
-      - name: Start isolated infrastructure
+      - name: Start isolated verification infrastructure
         run: |
           python3 scripts/init-env.py
-          docker compose -f compose.yml -f compose.dev.yml up -d --wait mysql redis
-      - name: Backend and database migration tests
+          docker compose -p parking-verification -f compose.yml -f compose.test.yml up -d --wait mysql redis redis-cache
+      - name: Backend and migration tests
         run: |
           set -a
           source .env
           set +a
-          export PARKING_INTEGRATION_TESTS=true TEST_DB_URL='jdbc:mysql://127.0.0.1:3307/parking_springboot?serverTimezone=Asia/Shanghai' TEST_REDIS_PORT=6380
+          export PARKING_INTEGRATION_TESTS=true PARKING_COMPOSE_PROJECT=parking-verification
+          export TEST_DB_URL='jdbc:mysql://127.0.0.1:23307/parking_springboot?serverTimezone=Asia/Shanghai' TEST_REDIS_PORT=26380 TEST_CACHE_PORT=26381
           cd parking/parking
           sh ./mvnw -B verify
           cd ../..
           python3 scripts/test-migration.py
-      - name: Frontend tests and build
+      - name: Frontend tests and production build
         working-directory: vue3/parking-vue
         run: |
           npm ci
           npm test
+          npm run test:components
           npm run build
-      - name: Stop test services
+      - name: Browser verification against production containers
+        run: |
+          docker compose -p parking-verification -f compose.yml -f compose.test.yml up -d --build --wait backend frontend
+          set -a
+          source .env
+          set +a
+          cd vue3/parking-vue
+          npx playwright install --with-deps chromium
+          npm run test:e2e
+      - name: Stop verification services and retain volumes
         if: always()
-        run: docker compose -f compose.yml -f compose.dev.yml down
+        run: docker compose -p parking-verification -f compose.yml -f compose.test.yml down

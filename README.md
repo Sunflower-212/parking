@@ -4,13 +4,15 @@
 
 预约默认保留 **30 分钟**。过期处理采用 **Redisson 持久化延迟队列**，结合数据库事务事件表、原子消息认领与幂等状态更新；不定时扫描预约表。
 
+![登录界面](docs/images/login.png)
+
 ## 功能与技术栈
 
 | 模块 | 内容 |
 | --- | --- |
 | 用户端 | 注册登录、个人资料、车位预约与取消、出入场/订单/充值历史、会员信息 |
-| 管理端 | 车位地图、停车场、用户、计费规则、出入场及统计 |
-| 超级管理员 | 管理员账号、所有停车场及共享计费规则维护 |
+| 停车场管理员 | 所属停车场、车位地图、出入场、停车订单及运营统计 |
+| 超级管理员 | 平台用户、充值流水、管理员账号、所有停车场及共享规则维护 |
 | 后端 | Java 17、Spring Boot 3.4.2、MyBatis、PageHelper 2、Redisson 3.43 |
 | 前端 | Vue 3、Vite、Pinia、Element Plus、ECharts |
 | 基础设施 | MySQL 8.4.4、Redis 7.4.2、Nginx、Docker Compose |
@@ -47,7 +49,7 @@ Windows 示例：
 
 ```powershell
 python scripts/init-env.py
-docker compose -f compose.yml -f compose.dev.yml up -d --wait mysql redis
+docker compose -f compose.yml -f compose.dev.yml up -d --wait mysql redis redis-cache
 # 使用你实际安装的 JDK 17；仅影响当前终端
 $env:JAVA_HOME = 'D:\Program Files\Java\jdk17.0.20'
 $env:PATH = "$env:JAVA_HOME\bin;$env:PATH"
@@ -57,6 +59,8 @@ Get-Content .env | ForEach-Object {
 $env:SPRING_CONFIG_NAME = 'application-example'
 $env:DB_URL = 'jdbc:mysql://127.0.0.1:3307/parking_springboot?serverTimezone=Asia/Shanghai'
 $env:REDIS_PORT = '6380'
+$env:CACHE_ENABLED = 'true'
+$env:CACHE_REDIS_PORT = '6381'
 cd parking/parking
 .\mvnw.cmd spring-boot:run
 ```
@@ -76,18 +80,20 @@ npm run dev
 Windows 下完整验证：
 
 ```powershell
-.\scripts\test.ps1
+.\scripts\test.ps1 -IncludeBrowser
 ```
 
 该脚本启动独立容器基础设施，运行后端测试、迁移测试以及前端测试和构建。运行前设置当前终端的 `JAVA_HOME` 为 JDK 17。
 
-后端普通 `mvnw verify` 执行单元测试；真实 MySQL/Redis 集成测试需设置 `PARKING_INTEGRATION_TESTS=true`、`TEST_DB_URL`、`TEST_REDIS_PORT` 及本地数据库/Redis凭据。CI 已配置完整验证。
+后端普通 `mvnw verify` 执行单元测试；真实 MySQL/Redis 集成测试需设置 `PARKING_INTEGRATION_TESTS=true`、`TEST_DB_URL`、`TEST_REDIS_PORT`、`TEST_CACHE_PORT` 及本地数据库/Redis 凭据。CI 已配置完整验证。
 
 ## 文档
 
 - [阅读手册](docs/reading-guide.md)：结构、数据关系、权限和预约队列原理。
 - [操作手册](docs/user-guide.md)：用户、管理员及超级管理员的操作步骤。
 - [Docker 部署手册](docs/docker-deployment.md)：Windows/Linux 部署、配置、迁移和备份恢复。
+- [优化说明](docs/optimization.md)：查询、索引、缓存一致性和性能测试方法。
+- [性能报告](docs/performance-report.md)：百万数据、100 并发及浏览器实测。
 - [修复与验证记录](docs/verification.md)：修复内容、测试结果及验证边界。
 
 ## 配置与隐私

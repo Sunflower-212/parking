@@ -39,7 +39,14 @@ public class ParkingFlowService {
     }
     private int number(Map<String,Object> row,String key) { return ((Number)row.get(key)).intValue(); }
     private Map<String,Object> lockUser(int id) { return one("select * from user where id=? for update",id); }
-    private void lockPark(int id) { one("select id from parking where id=? for update",id); }
+    private void lockPark(int id) {
+        var parking=one("select id,admin_id from parking where id=? for update",id);
+        Map<String,Object> actor=org.zjmproject.utils.ThreadLocalUtil.get();
+        // OCR may run between the controller's initial check and this transaction.
+        // Recheck the current owner while holding the parking lock.
+        if(actor!=null && ((Number)actor.get("permissions")).intValue()==0 && number(parking,"admin_id")!=((Number)actor.get("id")).intValue())
+            throw new IllegalArgumentException("无权操作此停车场");
+    }
     public void refreshCapacity(int parkId) {
         db.update("update parking set park_mount=(select count(*) from spaces where park_id=? and spaces_flag in (0,1)), park_spare=(select count(*) from spaces where park_id=? and spaces_flag=0),update_time=now() where id=?",parkId,parkId,parkId);
     }
@@ -52,6 +59,9 @@ public class ParkingFlowService {
         },keys);
         return Objects.requireNonNull(keys.getKey()).intValue();
     }
+    private void takeCapacity(int parkId) {
+        if(db.update("update parking set park_spare=park_spare-1,update_time=now() where id=? and park_spare>0",parkId)!=1) throw new IllegalStateException("余位数据异常，请核对停车场容量");
+    }
     private void occupy(int spaceId,int entryId,String username) {
         if(db.update("update spaces set spaces_flag=1,user_name=?,active_enter_id=?,update_time=now() where id=? and spaces_flag=0 and active_enter_id is null",username,entryId,spaceId)!=1)
             throw new IllegalStateException("车位已被占用，请刷新后重试");
@@ -60,7 +70,7 @@ public class ParkingFlowService {
         if(entry.get("space_id")==null) throw new IllegalStateException("旧记录缺少车位关联，请先完成数据迁移核对");
         if(db.update("update spaces set spaces_flag=0,user_name=null,active_enter_id=null,update_time=now() where id=? and active_enter_id=?",entry.get("space_id"),entry.get("id"))!=1)
             throw new IllegalStateException("车位关联异常，未执行释放，请联系管理员核对");
-        refreshCapacity(number(entry,"park_id"));
+        if(db.update("update parking set park_spare=park_spare+1,update_time=now() where id=? and park_spare<park_mount",entry.get("park_id"))!=1) throw new IllegalStateException("余位数据异常，请核对停车场容量");
     }
     private void completeEvent(int id) { db.update("update reservation_event set completed_at=now(),last_error=null where reservation_id=?",id); }
 
@@ -69,7 +79,7 @@ public class ParkingFlowService {
         Map<String,Object> user=lockUser(userId);
         String plate=(String)user.get("plate_num");
         if(plate==null || !plate.matches(org.zjmproject.pojo.User.LICENSE_PLATE_REGEX)) throw new IllegalArgumentException("请先完善有效车牌信息");
-        if(db.queryForObject("select count(*) from enter where user_id=? and (flag=1 or (flag=0 and reservation=1))",Integer.class,userId)>0)
+        if(db.queryForObject("select count(*) from enter where active_user_id=?",Integer.class,userId)>0)
             throw new IllegalStateException("您已有预约或车辆在场");
         int parkId=number(one("select park_id from spaces where id=?",spaceId),"park_id");
         lockPark(parkId);
@@ -77,7 +87,7 @@ public class ParkingFlowService {
         if(number(space,"spaces_flag")!=0) throw new IllegalStateException("该车位不可预约");
         LocalDateTime start=now(), expires=start.plus(timeout);
         int id=insertEntry(user,parkId,spaceId,0,1,start,expires);
-        occupy(spaceId,id,(String)user.get("user_name")); refreshCapacity(parkId);
+        occupy(spaceId,id,(String)user.get("user_name")); takeCapacity(parkId);
         db.update("insert into reservation_event(reservation_id,expires_at) values(?,?)",id,expires);
         events.publishEvent(new ReservationCreated(id));
         Enter result=new Enter(); result.setId(id); result.setSpace_id(spaceId); result.setPark_id(parkId); result.setReserved_at(start); result.setExpires_at(expires); result.setFlag(0); result.setReservation(1);
@@ -112,8 +122,8 @@ public class ParkingFlowService {
     public String enter(String plate,int parkId) {
         Map<String,Object> user=one("select * from user where plate_num=? for update",plate);
         int uid=number(user,"id"); lockPark(parkId);
-        if(db.queryForObject("select count(*) from enter where user_id=? and flag=1",Integer.class,uid)>0) throw new IllegalStateException("车辆已在场");
-        List<Map<String,Object>> reservations=db.queryForList("select * from enter where user_id=? and flag=0 and reservation=1 for update",uid);
+        if(db.queryForObject("select count(*) from enter where active_user_id=? and flag=1",Integer.class,uid)>0) throw new IllegalStateException("车辆已在场");
+        List<Map<String,Object>> reservations=db.queryForList("select * from enter where active_user_id=? and flag=0 and reservation=1 for update",uid);
         if(!reservations.isEmpty()) {
             Map<String,Object> entry=reservations.get(0);
             if(number(entry,"park_id")!=parkId) throw new IllegalStateException("预约属于其他停车场，请先取消原预约");
@@ -130,19 +140,20 @@ public class ParkingFlowService {
         List<Integer> free=db.queryForList("select id from spaces where park_id=? and spaces_flag=0 and active_enter_id is null order by id limit 1 for update",Integer.class,parkId);
         if(free.isEmpty()) throw new IllegalStateException("停车场没有可用车位");
         int id=insertEntry(user,parkId,free.get(0),1,0,now(),null);
-        occupy(free.get(0),id,(String)user.get("user_name")); refreshCapacity(parkId); return plate;
+        occupy(free.get(0),id,(String)user.get("user_name")); takeCapacity(parkId); return plate;
     }
     @Transactional
     public String exit(String plate,int parkId) {
         Map<String,Object> user=one("select * from user where plate_num=? for update",plate);
         int uid=number(user,"id"); lockPark(parkId);
-        Map<String,Object> entry=one("select * from enter where user_id=? and flag=1 for update",uid);
+        Map<String,Object> entry=one("select * from enter where active_user_id=? and flag=1 for update",uid);
         if(number(entry,"park_id")!=parkId) throw new IllegalStateException("车辆不在此停车场");
         Map<String,Object> rule=one("select r.* from parking p join rule r on r.id=p.rule_id where p.id=?",parkId);
         LocalDateTime start=db.queryForObject("select enter_time from enter where id=?",LocalDateTime.class,entry.get("id")), end=now();
         int minutes=MoneysUtil.getDuration(start,end);
         BigDecimal fee=MoneysUtil.getMoneys(minutes,number(rule,"free_time"),number(rule,"charging_unit"),new BigDecimal(rule.get("unit_cost").toString()));
-        LocalDateTime vipStart=db.queryForObject("select vip_start_time from user where id=?",LocalDateTime.class,uid), vipEnd=db.queryForObject("select vip_end_time from user where id=?",LocalDateTime.class,uid);
+        var vip=db.queryForObject("select vip_start_time,vip_end_time from user where id=?",(r,n)->new LocalDateTime[]{r.getObject(1,LocalDateTime.class),r.getObject(2,LocalDateTime.class)},uid);
+        LocalDateTime vipStart=vip[0],vipEnd=vip[1];
         if(vipStart!=null && vipEnd!=null && !end.isBefore(vipStart) && end.isBefore(vipEnd)) fee=BigDecimal.ZERO;
         if(db.update("update user set balance=balance-?,update_time=now() where id=? and balance>=?",fee,uid,fee)!=1) throw new IllegalStateException("余额不足");
         db.update("update enter set flag=2,update_time=now() where id=? and flag=1",entry.get("id"));

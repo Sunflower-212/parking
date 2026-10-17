@@ -27,6 +27,7 @@
                 and  <![CDATA[r.create_time < #{endTime}]]>
             </if>
         </where>
+    order by r.create_time desc,r.id desc
     </select>
     <select id="findRechargesByDate" resultMap="rechargesResultMap">
         select
@@ -46,6 +47,7 @@
                 and  <![CDATA[r.create_time < #{endDateTime}]]>
             </if>
         </where>
+    order by r.create_time desc,r.id desc
     </select>
     <resultMap id="rechargesResultMap" type="org.zjmproject.pojo.Recharges">
         <result property="id" column="id"/>

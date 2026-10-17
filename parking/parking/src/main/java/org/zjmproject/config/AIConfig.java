@@ -15,7 +15,7 @@ public class AIConfig {
 
     @Bean
     public ChatMemory chatMemory(){
-        return new InMemoryChatMemory();
+        return new org.zjmproject.service.BoundedChatMemory();
     }
     @Bean
     public ChatClient chatClient(OpenAiChatModel openAiChatModel, ChatMemory chatMemory){

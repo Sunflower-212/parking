@@ -1,6 +1,7 @@
 name: parking
 services:
   mysql:
+    mem_limit: ${MYSQL_MEMORY_LIMIT:-2g}
     image: mysql:8.4.4
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Set MYSQL_ROOT_PASSWORD}
@@ -8,7 +9,7 @@ services:
       MYSQL_USER: parking
       MYSQL_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD}
       TZ: Asia/Shanghai
-    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_0900_ai_ci"]
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_0900_ai_ci", "--innodb-buffer-pool-size=${MYSQL_BUFFER_POOL_SIZE:-1G}", "--max-connections=${MYSQL_MAX_CONNECTIONS:-100}", "--innodb-lock-wait-timeout=5", "--max-execution-time=5000"]
     volumes:
       - mysql-data:/var/lib/mysql
       - ./database/init:/docker-entrypoint-initdb.d:ro
@@ -19,10 +20,11 @@ services:
       retries: 40
     restart: unless-stopped
   redis:
+    mem_limit: ${REDIS_STATE_LIMIT:-1536m}
     image: redis:7.4.2-alpine
     environment:
       REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD}
-    command: ["sh", "-c", "exec redis-server --appendonly yes --appendfsync everysec --requirepass \"$$REDIS_PASSWORD\""]
+    command: ["sh", "-c", "exec redis-server --maxmemory ${REDIS_STATE_MEMORY:-512mb} --maxmemory-policy noeviction --appendonly yes --appendfsync everysec --requirepass \"$$REDIS_PASSWORD\""]
     volumes:
       - redis-data:/data
     healthcheck:
@@ -31,7 +33,20 @@ services:
       timeout: 4s
       retries: 20
     restart: unless-stopped
+  redis-cache:
+    mem_limit: ${REDIS_CACHE_LIMIT:-512m}
+    image: redis:7.4.2-alpine
+    environment:
+      REDIS_PASSWORD: ${CACHE_REDIS_PASSWORD:?Set CACHE_REDIS_PASSWORD}
+    command: ["sh", "-c", "exec redis-server --maxmemory ${REDIS_CACHE_MEMORY:-256mb} --maxmemory-policy allkeys-lfu --save '' --appendonly no --requirepass \"$$REDIS_PASSWORD\""]
+    healthcheck:
+      test: ["CMD-SHELL", "REDISCLI_AUTH=$$REDIS_PASSWORD redis-cli ping | grep -q PONG"]
+      interval: 5s
+      timeout: 4s
+      retries: 20
+    restart: unless-stopped
   backend:
+    mem_limit: ${BACKEND_MEMORY_LIMIT:-2g}
     build:
       context: .
       dockerfile: deploy/backend.Dockerfile
@@ -39,6 +54,11 @@ services:
       DB_URL: jdbc:mysql://mysql:3306/parking_springboot?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai
       DB_USER: parking
       DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD}
+      JAVA_TOOL_OPTIONS: ${JAVA_TOOL_OPTIONS:--XX:MaxRAMPercentage=50 -XX:+ExitOnOutOfMemoryError}
+      DB_POOL_SIZE: ${DB_POOL_SIZE:-20}
+      CACHE_ENABLED: "true"
+      CACHE_REDIS_HOST: redis-cache
+      CACHE_REDIS_PASSWORD: ${CACHE_REDIS_PASSWORD:?Set CACHE_REDIS_PASSWORD}
       REDIS_HOST: redis
       REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD}
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET}
@@ -74,6 +94,7 @@ services:
       retries: 12
     restart: unless-stopped
   frontend:
+    mem_limit: ${FRONTEND_MEMORY_LIMIT:-256m}
     build:
       context: .
       dockerfile: deploy/frontend.Dockerfile

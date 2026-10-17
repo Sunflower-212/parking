@@ -17,6 +17,7 @@ import java.util.List;
 
 @Service
 public class OrdersServiceImpl implements OrdersService {
+    @Autowired private java.time.Clock clock;
     @Autowired
     private OrdersMapper ordersMapper;
 
@@ -35,12 +36,12 @@ public class OrdersServiceImpl implements OrdersService {
         //创建pageBean对象
         PageBean<Orders> pageBean = new PageBean<>();
         //开启分页查询 PageHelper
-        PageHelper.startPage(pageNum,pageSize);
+        org.zjmproject.utils.PageQuery.start(pageNum,pageSize);
         LocalDateTime startDateTime=null;
         LocalDateTime endDateTime=null;
         if(date!=null){
             startDateTime = LocalDateTime.of(date, LocalTime.of(0,0,0));
-            endDateTime = LocalDateTime.of(date,LocalTime.MAX);
+            endDateTime = date.plusDays(1).atStartOfDay();
         }
         List<Orders> ordersList = ordersMapper.adminGetPageList(userName,parkName,startDateTime,endDateTime,adminId);
         Page<Orders> page = (Page<Orders>) ordersList;
@@ -55,12 +56,12 @@ public class OrdersServiceImpl implements OrdersService {
         //创建pageBean对象
         PageBean<Orders> pageBean = new PageBean<>();
         //开启分页查询 PageHelper
-        PageHelper.startPage(pageNum,pageSize);
+        org.zjmproject.utils.PageQuery.start(pageNum,pageSize);
         LocalDateTime startDateTime=null;
         LocalDateTime endDateTime=null;
         if(date!=null){
             startDateTime = LocalDateTime.of(date, LocalTime.of(0,0,0));
-            endDateTime = LocalDateTime.of(date,LocalTime.MAX);
+            endDateTime = date.plusDays(1).atStartOfDay();
         }
         List<Orders> ordersList = ordersMapper.rootGetPageList(userName,parkName,startDateTime,endDateTime,adminName);
         Page<Orders> page = (Page<Orders>) ordersList;
@@ -82,38 +83,38 @@ public class OrdersServiceImpl implements OrdersService {
 
     @Override
     public Integer findTodayExit() {
-        LocalDate today = LocalDate.now();
+        LocalDate today = LocalDate.now(clock);
         LocalDateTime startDateTime = today.atStartOfDay();
-        LocalDateTime endDateTime = today.atTime(LocalTime.MAX);
-        return ordersMapper.findTodayExit(startDateTime,endDateTime).size();
+        LocalDateTime endDateTime = today.plusDays(1).atStartOfDay();
+        return ordersMapper.countToday(startDateTime,endDateTime);
     }
 
     @Override
     public Integer findTodayExitByParkId(Integer parkId) {
-        LocalDate today = LocalDate.now();
+        LocalDate today = LocalDate.now(clock);
         LocalDateTime startDateTime = today.atStartOfDay();
-        LocalDateTime endDateTime = today.atTime(LocalTime.MAX);
-        return ordersMapper.findTodayExitByParkId(parkId,startDateTime,endDateTime).size();
+        LocalDateTime endDateTime = today.plusDays(1).atStartOfDay();
+        return ordersMapper.countTodayPark(parkId,startDateTime,endDateTime);
     }
 
     @Override
     public List<Orders> findExitListByDate(LocalDate localDate) {
         LocalDateTime startDateTime = localDate.atStartOfDay();
-        LocalDateTime endDateTime = localDate.atTime(LocalTime.MAX);
+        LocalDateTime endDateTime = localDate.plusDays(1).atStartOfDay();
         return ordersMapper.findTodayExit(startDateTime,endDateTime);
     }
 
     @Override
     public List<Orders> findExitListByDateAndParkId(Integer parkId, LocalDate localDate) {
         LocalDateTime startDateTime = localDate.atStartOfDay();
-        LocalDateTime endDateTime = localDate.atTime(LocalTime.MAX);
+        LocalDateTime endDateTime = localDate.plusDays(1).atStartOfDay();
         return ordersMapper.findTodayExitByParkId(parkId,startDateTime,endDateTime);
     }
 
     @Override
     public List<Orders> findOrdersListByDate(LocalDate localDate) {
         LocalDateTime startDateTime = localDate.atStartOfDay();
-        LocalDateTime endDateTime = localDate.atTime(LocalTime.MAX);
+        LocalDateTime endDateTime = localDate.plusDays(1).atStartOfDay();
         return ordersMapper.findTodayExit(startDateTime,endDateTime);
     }
 }

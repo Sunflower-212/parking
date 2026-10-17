@@ -23,7 +23,8 @@ import static org.junit.jupiter.api.Assertions.*;
 @SpringBootTest(webEnvironment=SpringBootTest.WebEnvironment.RANDOM_PORT,properties={
     "spring.config.name=application-example","spring.datasource.url=${TEST_DB_URL}",
     "spring.data.redis.port=${TEST_REDIS_PORT:6380}","parking.reservation-timeout=2s",
-    "parking.integrations.alipay=true","alipay.app-id=integration-app"
+    "parking.integrations.alipay=true","alipay.app-id=integration-app",
+    "parking.cache.enabled=true","parking.cache.port=${TEST_CACHE_PORT:26381}","parking.cache.password=${CACHE_REDIS_PASSWORD}"
 })
 class ParkingIntegrationTest {
     @Autowired JdbcTemplate db;
@@ -163,5 +164,165 @@ class ParkingIntegrationTest {
         headers.set("Authorization",old);
         assertEquals(401,http.exchange("/user/userInfo",HttpMethod.GET,new HttpEntity<>(headers),String.class).getStatusCode().value());
         assertEquals(401,http.getForEntity("/enter/adminPageList?pageNum=1&pageSize=5",String.class).getStatusCode().value());
+    }
+
+    @Autowired DashboardService dashboard;
+    @Autowired MembershipService membership;
+    @Autowired ReadCache cache;
+    @Autowired org.springframework.data.redis.core.StringRedisTemplate tokens;
+    @Autowired org.springframework.transaction.PlatformTransactionManager transactions;
+    String token(int id,String name,int role) {
+        var claims=new HashMap<String,Object>();claims.put("id",id);claims.put("permissions",role);claims.put(role==-1?"username":"adminname",name);
+        String value=org.zjmproject.utils.JwtUtil.genToken(claims);
+        tokens.opsForValue().set((role==-1?"user=":"admin=")+name,value,java.time.Duration.ofMinutes(5));return value;
+    }
+    ResponseEntity<Map> get(String path,String token) {var h=new HttpHeaders();h.set("Authorization",token);return http.exchange(path,HttpMethod.GET,new HttpEntity<>(h),Map.class);}
+    @Test void platformManagementIsSuperAdministratorOnly() {
+        String ordinary=token(999999,prefix+"admin",0),normal=token(user,prefix,-1);
+        for(String path:List.of("/user/pageList?pageNum=1&pageSize=20","/user/export","/recharges/pageList?pageNum=1&pageSize=20","/recharges/data","/admin/list")) assertEquals(403,get(path,ordinary).getStatusCode().value(),path);
+        assertEquals(403,get("/dashboard/summary",normal).getStatusCode().value());
+        assertEquals(0,get("/system/capabilities",normal).getBody().get("code"));
+    }
+    @Test void paginatedHistoryIsStableAndLegacyHistoryIsBounded() {
+        for(int i=0;i<105;i++)db.update("insert into orders(plate_num,user_id,park_id,enter_time,exit_time,parking_duration,moneys,create_time) values(?,?,?,now(),now(),0,0,now())",plate,user,park);
+        String auth=token(user,prefix,-1);
+        Map body=get("/orders/userPageList?pageNum=1&pageSize=20",auth).getBody();assertEquals(0,body.get("code"));
+        Map data=(Map)body.get("data");assertEquals(105,((Number)data.get("total")).intValue());assertEquals(20,((List)data.get("items")).size());
+        List<Map> items=(List<Map>)data.get("items");assertTrue(((Number)items.get(0).get("id")).intValue()>((Number)items.get(1).get("id")).intValue());
+        assertEquals(1,get("/orders/userList",auth).getBody().get("code"));
+        assertEquals(1,get("/orders/userPageList?pageNum=1&pageSize=101",auth).getBody().get("code"));
+        assertEquals(0,get("/recharges/userPageList",auth).getBody().get("code"));
+    }
+    @Test void dashboardScopesInSqlAndNeverReturnsPlatformMetricsToOrdinaryAdmin() {
+        int admin=insert("insert into admin(admin_name,password,permissions,create_time,update_time) values(?,?,0,now(),now())",prefix+"scope",Md5Util.encode("test12345"));
+        try {
+            db.update("update parking set admin_id=? where id=?",admin,park2);
+            db.update("insert into orders(plate_num,user_id,park_id,enter_time,exit_time,parking_duration,moneys,create_time) values(?,?,?,now(),now(),0,9,now())",plate,user,park);
+            String auth=token(admin,prefix+"scope",0);
+            Map data=(Map)get("/dashboard/summary",auth).getBody().get("data");Map counts=(Map)data.get("counters");
+            assertEquals(1,((Number)counts.get("parkingNumber")).intValue());assertFalse(counts.containsKey("userNumber"));assertEquals(0,new BigDecimal(counts.get("revenueToday").toString()).signum());
+            assertEquals(1,get("/dashboard/summary?park_id="+park,auth).getBody().get("code"));
+            assertEquals(1,get("/spaces/layout?park_id="+park+"&spaces_storey=1",auth).getBody().get("code"));
+            assertEquals(1,get("/dashboard/summary?days=32",auth).getBody().get("code"));
+        } finally {db.update("update parking set admin_id=(select min(id) from admin where permissions=1) where id=?",park2);db.update("delete from admin where id=?",admin);}
+    }
+    @Test void layoutAndAvailabilityNeverDiscloseTheOccupyingUser() {
+        flow.reserve(user,space);String auth=token(user2,prefix+"b",-1);
+        Map response=get("/spaces/layout?park_id="+park+"&spaces_storey=1",auth).getBody();
+        List<Map> rows=(List<Map>)response.get("data");assertFalse(rows.isEmpty());assertTrue(rows.stream().noneMatch(r->r.containsKey("user_name")||r.containsKey("active_enter_id")));
+        List<Map> states=(List<Map>)get("/spaces/availability?park_id="+park+"&spaces_storey=1",auth).getBody().get("data");assertEquals(1,((Number)states.stream().filter(r->((Number)r.get("id")).intValue()==space).findFirst().orElseThrow().get("spaces_flag")).intValue());
+    }
+    @Test void concurrentMembershipRenewalsAccumulateInsteadOfOverwriting() throws Exception {
+        membership.change(user,30,false);LocalDateTime before=db.queryForObject("select vip_end_time from user where id=?",LocalDateTime.class,user);
+        var pool=Executors.newFixedThreadPool(2);try{var a=pool.submit(()->membership.change(user,10,true));var b=pool.submit(()->membership.change(user,10,true));a.get(5,TimeUnit.SECONDS);b.get(5,TimeUnit.SECONDS);}finally{pool.shutdownNow();}
+        assertEquals(before.plusDays(20),db.queryForObject("select vip_end_time from user where id=?",LocalDateTime.class,user));
+    }
+    @Test void cacheInvalidationHappensAfterCommitAndNotAfterRollback() {
+        String resource="it:"+prefix;var count=new java.util.concurrent.atomic.AtomicInteger();var type=new com.fasterxml.jackson.core.type.TypeReference<Map<String,Integer>>(){};
+        java.util.function.Supplier<Map<String,Integer>> loader=()->Map.of("n",count.incrementAndGet());
+        assertEquals(1,cache.get(resource,"key",java.time.Duration.ofMinutes(1),type,loader).get("n"));
+        assertEquals(1,cache.get(resource,"key",java.time.Duration.ofMinutes(1),type,loader).get("n"));
+        var tx=new org.springframework.transaction.support.TransactionTemplate(transactions);
+        tx.executeWithoutResult(status->{cache.invalidateAfterCommit(resource);status.setRollbackOnly();});
+        assertEquals(1,cache.get(resource,"key",java.time.Duration.ofMinutes(1),type,loader).get("n"));
+        tx.executeWithoutResult(status->cache.invalidateAfterCommit(resource));
+        assertEquals(2,cache.get(resource,"key",java.time.Duration.ofMinutes(1),type,loader).get("n"));
+    }
+    @Test void cacheFailureFallsBackAndCircuitPreventsRepeatedTimeouts() {
+        var isolated=new ReadCache(new com.fasterxml.jackson.databind.ObjectMapper(),new io.micrometer.core.instrument.simple.SimpleMeterRegistry(),true,"127.0.0.1",1,"");
+        try {var type=new com.fasterxml.jackson.core.type.TypeReference<Map<String,Integer>>(){};assertEquals(7,isolated.get("failure","key",java.time.Duration.ofSeconds(1),type,()->Map.of("n",7)).get("n"));long start=System.nanoTime();assertEquals(8,isolated.get("failure","key",java.time.Duration.ofSeconds(1),type,()->Map.of("n",8)).get("n"));assertTrue(System.nanoTime()-start<TimeUnit.MILLISECONDS.toNanos(200));}finally{isolated.close();}
+    }
+    @Test void addingAUserPreservesSubmittedProfileAndDoesNotAcceptPrivilegedFields() {
+        int admin=db.queryForObject("select min(id) from admin where permissions=1",Integer.class);String auth=token(admin,"integration-super",1);
+        var h=new HttpHeaders();h.set("Authorization",auth);h.setContentType(MediaType.APPLICATION_JSON);
+        String name=prefix+"new";
+        var result=http.postForEntity("/user/addUser",new HttpEntity<>(Map.of("user_name",name,"name","测试","plate_num","沪A-12345","car_color","白色","tel_num","13912345678","balance",99999),h),Map.class);
+        try {assertEquals(0,result.getBody().get("code"));assertEquals("测试",db.queryForObject("select name from user where user_name=?",String.class,name));assertEquals(0,db.queryForObject("select balance from user where user_name=?",BigDecimal.class,name).signum());} finally{db.update("delete from user where user_name=?",name);}
+    }
+
+    @Test void administratorPasswordChangeChecksOldPasswordAndRevokesToken() {
+        String name=prefix+"pw";
+        int id=insert("insert into admin(admin_name,password,permissions,create_time,update_time) values(?,?,0,now(),now())",name,Md5Util.encode("test12345"));
+        String auth=token(id,name,0);var h=new HttpHeaders();h.set("Authorization",auth);h.setContentType(MediaType.APPLICATION_JSON);
+        try {
+            var invalid=http.exchange("/admin/updatePassword",HttpMethod.PATCH,new HttpEntity<>(Map.of("old_pwd","incorrect","new_pwd","test54321","re_pwd","test54321"),h),Map.class);
+            assertEquals(1,invalid.getBody().get("code"));
+            var valid=http.exchange("/admin/updatePassword",HttpMethod.PATCH,new HttpEntity<>(Map.of("old_pwd","test12345","new_pwd","test54321","re_pwd","test54321"),h),Map.class);
+            assertEquals(0,valid.getBody().get("code"));assertEquals(401,get("/admin/adminInfo",auth).getStatusCode().value());
+        } finally {db.update("delete from admin where id=?",id);}
+    }
+
+    @Test void cancellationAndExpiryCompeteWithoutDoubleRelease() throws Exception {
+        int id=flow.reserve(user,space).getId();db.update("update enter set expires_at=? where id=?",LocalDateTime.now(clock).minusSeconds(1),id);
+        var start=new CountDownLatch(1);var pool=Executors.newFixedThreadPool(2);
+        try {var a=pool.submit(()->{start.await();flow.cancel(user,id);return true;});var b=pool.submit(()->{start.await();flow.expire(id);return true;});start.countDown();assertTrue(a.get(5,TimeUnit.SECONDS));assertTrue(b.get(5,TimeUnit.SECONDS));}finally{pool.shutdownNow();}
+        assertEquals(2,available());assertNull(db.queryForObject("select active_enter_id from spaces where id=?",Integer.class,space));
+    }
+    @Test void arrivingAtAnExpiredReservationCannotBeReleasedByTheOldMessage() throws Exception {
+        int old=flow.reserve(user,space).getId();db.update("update enter set expires_at=? where id=?",LocalDateTime.now(clock).minusSeconds(1),old);
+        var start=new CountDownLatch(1);var pool=Executors.newFixedThreadPool(2);
+        try {var a=pool.submit(()->{start.await();flow.enter(plate,park);return true;});var b=pool.submit(()->{start.await();flow.expire(old);return true;});start.countDown();a.get(5,TimeUnit.SECONDS);b.get(5,TimeUnit.SECONDS);}finally{pool.shutdownNow();}
+        flow.expire(old);assertEquals(1,available());assertEquals(1,db.queryForObject("select count(*) from enter where active_user_id=? and flag=1",Integer.class,user));
+        assertNotEquals(old,db.queryForObject("select active_enter_id from spaces where spaces_flag=1 and park_id=?",Integer.class,park));
+    }
+    @Test void cancellationRacingArrivalLeavesExactlyOneInLotRecord() throws Exception {
+        int id=flow.reserve(user,space).getId();var start=new CountDownLatch(1);var pool=Executors.newFixedThreadPool(2);
+        try {var a=pool.submit(()->{start.await();try{flow.cancel(user,id);}catch(IllegalStateException expected){}return true;});var b=pool.submit(()->{start.await();flow.enter(plate,park);return true;});start.countDown();a.get(5,TimeUnit.SECONDS);b.get(5,TimeUnit.SECONDS);}finally{pool.shutdownNow();}
+        assertEquals(1,available());assertEquals(1,db.queryForObject("select count(*) from enter where active_user_id=? and flag=1",Integer.class,user));
+    }
+    @Test void distinctSpaceReservationsDoNotLoseCapacityUpdates() throws Exception {
+        var pool=Executors.newFixedThreadPool(2);try {var a=pool.submit(()->flow.reserve(user,space));var b=pool.submit(()->flow.reserve(user2,space2));int first=a.get(5,TimeUnit.SECONDS).getId(),second=b.get(5,TimeUnit.SECONDS).getId();assertEquals(0,available());flow.cancel(user,first);flow.cancel(user2,second);assertEquals(2,available());}finally{pool.shutdownNow();}
+    }
+    @Test void concurrentPaymentCallbacksCreditOnce() throws Exception {
+        int id=insert("insert into recharges(user_id,amounts,flag,pay_method,create_time) values(?,12.34,0,0,now())",user);
+        var params=Map.of("app_id","integration-app","trade_status","TRADE_SUCCESS","out_trade_no",Integer.toString(id),"total_amount","12.34","trade_no",prefix,"gmt_payment","2026-10-17 12:00:00");
+        var pool=Executors.newFixedThreadPool(2);try{var a=pool.submit(()->payments.confirm(params));var b=pool.submit(()->payments.confirm(params));a.get(5,TimeUnit.SECONDS);b.get(5,TimeUnit.SECONDS);}finally{pool.shutdownNow();}
+        assertEquals(0,new BigDecimal("32.34").compareTo(db.queryForObject("select balance from user where id=?",BigDecimal.class,user)));
+    }
+    @Test void profileUpdatesUseTheAuthenticatedUserAndIgnoreBalance() {
+        String auth=token(user,prefix,-1);var h=new HttpHeaders();h.set("Authorization",auth);h.setContentType(MediaType.APPLICATION_JSON);
+        var payload=Map.of("id",user2,"name","本人","plate_num",plate,"car_color","白色","tel_num","13912345678","balance",99999,"status",1);
+        assertEquals(0,http.exchange("/user/update",HttpMethod.PUT,new HttpEntity<>(payload,h),Map.class).getBody().get("code"));
+        assertEquals("本人",db.queryForObject("select name from user where id=?",String.class,user));assertEquals("",db.queryForObject("select name from user where id=?",String.class,user2));assertEquals(0,new BigDecimal("20").compareTo(db.queryForObject("select balance from user where id=?",BigDecimal.class,user)));assertEquals(0,db.queryForObject("select status from user where id=?",Integer.class,user));
+    }
+    @Test void dateFilteringIncludesStartAndExcludesNextMidnight() {
+        var date=java.time.LocalDate.now(clock).minusDays(1);
+        for(var time:List.of(date.atStartOfDay(),date.plusDays(1).atStartOfDay())) db.update("insert into orders(plate_num,user_id,park_id,enter_time,exit_time,parking_duration,moneys,create_time) values(?,?,?,?,?,0,0,?)",plate,user,park,time,time,time);
+        assertEquals(1,orders.rootGetPageList(1,20,prefix,null,date,null).getTotal());
+    }
+    @Test void aLateCacheFillCannotOverwriteANewVersion() throws Exception {
+        String resource="race:"+prefix;var loaded=new CountDownLatch(1);var release=new CountDownLatch(1);var pool=Executors.newSingleThreadExecutor();var type=new com.fasterxml.jackson.core.type.TypeReference<Map<String,Integer>>(){};
+        try {var old=pool.submit(()->cache.get(resource,"key",java.time.Duration.ofMinutes(1),type,()->{loaded.countDown();try{release.await(5,TimeUnit.SECONDS);}catch(InterruptedException e){Thread.currentThread().interrupt();throw new IllegalStateException(e);}return Map.of("n",1);}));assertTrue(loaded.await(5,TimeUnit.SECONDS));cache.invalidateAfterCommit(resource);release.countDown();assertEquals(1,old.get(5,TimeUnit.SECONDS).get("n"));assertEquals(2,cache.get(resource,"key",java.time.Duration.ofMinutes(1),type,()->Map.of("n",2)).get("n"));}finally{release.countDown();pool.shutdownNow();}
+    }
+
+    @Autowired AccessGuard guard;
+    @Test void ownershipIsRecheckedAfterOcrBeforeTheVehicleTransaction() {
+        int old=insert("insert into admin(admin_name,password,permissions,create_time,update_time) values(?,?,0,now(),now())",prefix+"owner",Md5Util.encode("test12345"));
+        int owner=db.queryForObject("select admin_id from parking where id=?",Integer.class,park);
+        try {
+            db.update("update parking set admin_id=? where id=?",old,park);
+            org.zjmproject.utils.ThreadLocalUtil.set(Map.of("id",old,"permissions",0));guard.parking(park);
+            db.update("update parking set admin_id=? where id=?",owner,park);
+            assertThrows(IllegalArgumentException.class,()->flow.enter(plate,park));assertEquals(2,available());
+        }finally{org.zjmproject.utils.ThreadLocalUtil.remove();db.update("update parking set admin_id=? where id=?",owner,park);db.update("delete from admin where id=?",old);}
+    }
+    @Test void authorizationUsesCurrentOwnerInsteadOfAnOldTransactionSnapshot() throws Exception {
+        int old=insert("insert into admin(admin_name,password,permissions,create_time,update_time) values(?,?,0,now(),now())",prefix+"snapshot",Md5Util.encode("test12345"));
+        int owner=db.queryForObject("select admin_id from parking where id=?",Integer.class,park);
+        var snapshot=new CountDownLatch(1);var changed=new CountDownLatch(1);var pool=Executors.newSingleThreadExecutor();
+        try {
+            db.update("update parking set admin_id=? where id=?",old,park);
+            var attempt=pool.submit(()->{org.zjmproject.utils.ThreadLocalUtil.set(Map.of("id",old,"permissions",0));try{return new org.springframework.transaction.support.TransactionTemplate(transactions).execute(status->{db.queryForObject("select admin_id from parking where id=?",Integer.class,park);snapshot.countDown();try{changed.await(5,TimeUnit.SECONDS);}catch(InterruptedException e){throw new IllegalStateException(e);}try{guard.parking(park);return false;}catch(IllegalArgumentException expected){return true;}});}finally{org.zjmproject.utils.ThreadLocalUtil.remove();}});
+            assertTrue(snapshot.await(5,TimeUnit.SECONDS));db.update("update parking set admin_id=? where id=?",owner,park);changed.countDown();assertTrue(attempt.get(5,TimeUnit.SECONDS));
+        }finally{changed.countDown();pool.shutdownNow();db.update("update parking set admin_id=? where id=?",owner,park);db.update("delete from admin where id=?",old);}
+    }
+
+    @Test void aMissingParkingCacheIsInvalidatedWhenTheParkingIsCreated() {
+        int owner=db.queryForObject("select admin_id from parking where id=?",Integer.class,park2);
+        db.update("delete from parking where id=?",park2);String auth=token(user,prefix,-1);
+        assertEquals(1,get("/spaces/layout?park_id="+park2+"&spaces_storey=1",auth).getBody().get("code"));
+        db.update("insert into parking(id,admin_id,park_name,park_address,park_mount,park_spare,park_storey,rule_id,create_time,update_time) values(?,?,?,'test',0,0,1,?,now(),now())",park2,owner,prefix+"b",rule);
+        cache.invalidateAfterCommit("catalog");
+        assertEquals(0,get("/spaces/layout?park_id="+park2+"&spaces_storey=1",auth).getBody().get("code"));
     }
 }

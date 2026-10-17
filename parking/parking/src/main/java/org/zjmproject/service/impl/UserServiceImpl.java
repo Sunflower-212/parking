@@ -19,10 +19,11 @@ import java.time.LocalTime;
 import java.util.List;
 import java.util.Map;
 
-import static java.time.LocalDateTime.now;
+
 
 @Service
 public class UserServiceImpl implements UserService {
+    @Autowired private java.time.Clock clock;
 
     @Autowired
     private UserMapper userMapper;
@@ -46,7 +47,7 @@ public class UserServiceImpl implements UserService {
     public void update(User user) {
         Map<String,Object> actor = ThreadLocalUtil.get();
         user.setId((Integer) actor.get("id"));
-        user.setUpdate_time(now());
+        user.setUpdate_time(LocalDateTime.now(clock));
         userMapper.update(user);
     }
 
@@ -72,7 +73,7 @@ public class UserServiceImpl implements UserService {
         //创建pageBean对象
         PageBean<User> pageBean = new PageBean<>();
         //开启分页查询 PageHelper
-        PageHelper.startPage(pageNum,pageSize);
+        org.zjmproject.utils.PageQuery.start(pageNum,pageSize);
         List<User> userList = userMapper.pageListFind(plateNum,carColor,status,userName);
         //Page中提供了方法，可获取PageHelper分页查询后，得到的总记录条数和当前页数据
         Page<User> page = (Page<User>) userList;
@@ -86,7 +87,7 @@ public class UserServiceImpl implements UserService {
 
     @Override
     public void getVip(Integer id,Integer days) {
-        userMapper.updateVipData(id,now(),now().plusDays(days));
+        userMapper.updateVipData(id,LocalDateTime.now(clock),LocalDateTime.now(clock).plusDays(days));
     }
 
     @Override
@@ -146,25 +147,19 @@ public class UserServiceImpl implements UserService {
 
     @Override
     public void checkAndUpdateUserStatus() {
-        List<User> userList = userMapper.findAllVip();
-        for (User user : userList) {
-            if (user.getVip_end_time().isBefore(LocalDateTime.now())) {
-                user.setStatus(0);
-                userMapper.updateStatus(user);
-            }
-        }
+        while(userMapper.expireVip(LocalDateTime.now(clock))==500) { /* bounded update batches */ }
     }
 
     @Override
     public Integer getUserNumber() {
-        return userMapper.getUserList().size();
+        return Math.toIntExact(userMapper.countUsers());
     }
 
     @Override
     public Integer getTodayUserNumber() {
-        LocalDate today = LocalDate.now();
+        LocalDate today = LocalDate.now(clock);
         LocalDateTime startDateTime = today.atStartOfDay();
-        LocalDateTime endDateTime = today.atTime(LocalTime.MAX);
-        return userMapper.getTodayUserList(startDateTime,endDateTime).size();
+        LocalDateTime endDateTime = today.plusDays(1).atStartOfDay();
+        return Math.toIntExact(userMapper.countNewUsers(startDateTime,endDateTime));
     }
 }

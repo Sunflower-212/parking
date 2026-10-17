@@ -9,6 +9,7 @@
     <select id="findByTypeAndUserId" resultType="org.zjmproject.pojo.HistoricalSession">
         SELECT * FROM historicalSession
         WHERE type = #{type} AND userId = #{userId}
+    order by update_time desc,id desc
     </select>
 
     <delete id="deleteByChatId">
@@ -19,5 +20,6 @@
     <select id="findByChatId" resultType="org.zjmproject.pojo.HistoricalSession">
         SELECT * FROM historicalSession
         WHERE chatId = #{chatId}
+    order by update_time desc,id desc
     </select>
 </mapper>

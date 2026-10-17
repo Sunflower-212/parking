@@ -69,7 +69,7 @@
     </delete>
     <select id="findSpacesByParking" resultMap="SpacesResultMap">
         select
-            s.*,
+            s.id,s.park_id,s.spaces_name,s.spaces_col,s.spaces_row,s.spaces_storey,s.spaces_flag,
             p.park_name
         from spaces s
         left join
@@ -84,6 +84,7 @@
         <if test="parkAddress!=null">
             and park_address like concat('%', #{parkAddress}, '%')
         </if>
+ order by s.id limit 200
     </select>
     <resultMap id="SpacesResultMap" type="org.zjmproject.pojo.Spaces">
         <result column="active_enter_id" property="active_enter_id"/>

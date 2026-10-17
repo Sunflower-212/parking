@@ -19,10 +19,11 @@
                 and park_name like concat('%',#{parkName},'%')
             </if>
             <if test="startDateTime!=null and endDateTime!=null">
-                and  <![CDATA[enter_time >= #{startDateTime}]]>
-                and  <![CDATA[enter_time < #{endDateTime}]]>
+                and  <![CDATA[e.enter_time >= #{startDateTime}]]>
+                and  <![CDATA[e.enter_time < #{endDateTime}]]>
             </if>
         </where>
+    order by e.enter_time desc,e.id desc
     </select>
     <select id="adminGetPageList" resultType="org.zjmproject.pojo.Enter">
         select
@@ -38,7 +39,7 @@
         <where>
             p.admin_id=#{adminId}
             <if test="plateNum!=null">
-                and plate_num like concat('%',#{plateNum},'%')
+                and e.plate_num like concat('%',#{plateNum},'%')
             </if>
             <if test="parkName!=null">
                 and park_name like concat('%',#{parkName},'%')
@@ -47,6 +48,7 @@
                 and flag = #{flag}
             </if>
         </where>
+    order by e.enter_time desc,e.id desc
     </select>
     <select id="rootGetPageList" resultType="org.zjmproject.pojo.Enter">
         select
@@ -65,7 +67,7 @@
                 admin_name = #{adminName}
             </if>
             <if test="plateNum!=null">
-                and plate_num like concat('%',#{plateNum},'%')
+                and e.plate_num like concat('%',#{plateNum},'%')
             </if>
             <if test="parkName!=null">
                 and park_name like concat('%',#{parkName},'%')
@@ -75,6 +77,7 @@
             </if>
         </where>
 
+    order by e.enter_time desc,e.id desc
     </select>
     <select id="isVehicle" resultType="org.zjmproject.pojo.Enter">
         select
@@ -87,7 +90,8 @@
             parking p on e.park_id = p.id
         left join
             user u on e.user_id = u.id
-        where user_id=#{userId} and flag=#{flag}
+        where e.user_id=#{userId} and e.flag=#{flag}
+    order by e.enter_time desc,e.id desc
     </select>
     <select id="isReservation" resultType="org.zjmproject.pojo.Enter">
         select
@@ -100,6 +104,7 @@
             parking p on e.park_id = p.id
         left join
             user u on e.user_id = u.id
-        where user_id=#{userId} and flag=#{flag} and reservation=#{reservation}
+        where e.user_id=#{userId} and e.flag=#{flag} and reservation=#{reservation}
+    order by e.enter_time desc,e.id desc
     </select>
 </mapper>

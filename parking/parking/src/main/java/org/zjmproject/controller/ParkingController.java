@@ -18,6 +18,8 @@ import java.util.Map;
 @RequestMapping("/parking")
 public class ParkingController {
     @Autowired private org.zjmproject.service.AccessGuard access;
+    @Autowired private org.zjmproject.service.FloorService floors;
+    @Autowired private org.springframework.jdbc.core.JdbcTemplate db;
     @Autowired
     private ParkingService parkingService;
     @Autowired
@@ -135,9 +137,12 @@ public class ParkingController {
 
 
 
+    @GetMapping("/catalog") public Result<?> catalog(){return Result.success(floors.catalog());}
+
     @GetMapping("/list")
     public Result<List<Parking>> parkingList(){
-        List<Parking> parkingList = parkingService.parkingList();
+        Map<String,Object> actor=ThreadLocalUtil.get();
+        List<Parking> parkingList = ((Number)actor.get("permissions")).intValue()==0?parkingService.adminGetParkingList(((Number)actor.get("id")).intValue()):parkingService.parkingList();
         return Result.success(parkingList);
     }
 
@@ -165,12 +170,9 @@ public class ParkingController {
             return Result.error("系统错误，停车场不存在");
         }
         Integer parkingId = findParking.getId();
-        List<Enter> enterList = enterService.findEnterListByParkingId(parkingId);
-        List<Orders> ordersList = ordersService.findOrdersListByParkingId(parkingId);
-        List<Spaces> spacesList = spacesService.findSpacesListByParkingId(parkingId);
-        if(!enterList.isEmpty() ||!ordersList.isEmpty()||!spacesList.isEmpty()){
-            return Result.error("存在该停车场关联数据，无法删除");
-        }
+        access.parking(parkingId);
+        db.queryForObject("select id from parking where id=? for update",Integer.class,parkingId);
+        if(Boolean.TRUE.equals(db.queryForObject("select exists(select 1 from enter where park_id=?) or exists(select 1 from orders where park_id=?) or exists(select 1 from spaces where park_id=?)",Boolean.class,parkingId,parkingId,parkingId))) return Result.error("存在该停车场关联数据，无法删除");
         switch (permissions){
             case 0:{
                 String adminName = (String) map.get("adminname");

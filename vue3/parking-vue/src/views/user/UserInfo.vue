@@ -1,115 +1,76 @@
 <script setup>
-import { ref , computed} from 'vue'
-import useUserInfoStore from '@/stores/userInfo.js'
-const userInfoStore = useUserInfoStore();
-
-const userInfo = ref({
-    ...userInfoStore.info
-})
-const originalUserInfo = ref({})
+import { ref } from 'vue'
+import { ElMessage } from 'element-plus'
+import request from '@/utils/request'
+import useUser from '@/stores/userInfo'
+import PageShell from '@/components/PageShell.vue'
+const store = useUser(),
+  model = ref({ ...store.info }),
+  form = ref(),
+  busy = ref(false)
 const rules = {
-    name: [
-        { required: true, message: '请输入姓名', trigger: 'blur' },
-        {
-            pattern: /^\S{1,10}$/,
-            message: '昵称必须是1-10位的非空字符串',
-            trigger: 'blur'
-        }
-    ],
-    plate_num: [
-        { required: true, message: '请输入用户车牌', trigger: 'blur' },
-        {
-            pattern:/^([京津沪渝冀晋辽吉黑苏浙皖闽赣鲁豫鄂湘粤桂琼川贵云藏陕甘青宁新港澳台])[A-Z]{1}-[A-Z0-9]{5,6}$/,
-            message:'车牌格式为XX-XXXXX(X)',
-            trigger:'blur'
-        }
-    ],
-    car_color:[
-        { required:false,message:'请输入车辆颜色',trigger:'blur'},
-        {
-            pattern:/^[\u4e00-\u9fa5]{1,5}色$/,
-            message:'颜色格式为xxxxx色',
-            trigger:'blur'
-        }
-    ],
-    tel_num:[
-        { required:true,message:'请输入电话号码',trigger:'blur'},
-        {
-            pattern:/^1(3[0-9]|4[57]|5[0-35-9]|7[0678]|8[0-9])\d{8}$/,
-            message:'请输入正确的电话格式',
-            trigger:'blur'
-        }
-    ]
+  name: [
+    { required: true, message: '请输入姓名' },
+    { min: 1, max: 10, message: '姓名最多10位' },
+  ],
+  plate_num: [
+    { required: true, message: '请输入车牌' },
+    {
+      pattern:
+        /^[京津沪渝冀晋辽吉黑苏浙皖闽赣鲁豫鄂湘粤桂琼川贵云藏陕甘青宁新港澳台][A-Z]-[A-Z0-9]{5,6}$/,
+      message: '例如 京A-12345',
+    },
+  ],
+  car_color: [
+    { required: true, message: '请输入车辆颜色' },
+    { pattern: /^[\u4e00-\u9fa5]{1,5}色$/, message: '例如 白色' },
+  ],
+  tel_num: [
+    { required: true, message: '请输入手机号' },
+    { pattern: /^1[3-9]\d{9}$/, message: '手机号格式无效' },
+  ],
 }
-const saveOriginalUserInfo = () => {
-    Object.assign(originalUserInfo.value, userInfo.value);
-};
-saveOriginalUserInfo();
-
-// 检查表单数据是否已经改变的计算属性
-const isFormChanged = computed(() => {
-      return JSON.stringify(userInfo.value) !== JSON.stringify(originalUserInfo.value);
-})
-
-//修改个人信息
-import { updateUserInfoService } from '@/api/user.js'
-import {ElMessage} from 'element-plus'
-const updateUserInfo =async()=>{
-    let result = await updateUserInfoService(userInfo.value);
-    ElMessage.success(result.message?result.message:'修改成功')
-    //修改pinia中的个人信息
-    userInfoStore.setInfo(userInfo.value)
-    //重新保存修改后的数据
-    saveOriginalUserInfo();
+async function save() {
+  if (busy.value || !(await form.value.validate().catch(() => false))) return
+  busy.value = true
+  try {
+    await request.put('/user/update', model.value)
+    store.setInfo((await request.get('/user/userInfo')).data)
+    ElMessage.success('资料已更新')
+  } catch {
+  } finally {
+    busy.value = false
+  }
 }
 </script>
-
-
-
 <template>
-    <el-card class="page-container">
-        <template #header>
-            <div class="header">
-                <span>基本资料</span>
-            </div>
-        </template>
-        <el-row>
-            <el-col :span="12">
-                <el-form :model="userInfo" :rules="rules" label-width="100px" size="large">
-                    <el-form-item label="登录名称">
-                        <el-input v-model="userInfo.user_name" disabled></el-input>
-                    </el-form-item>
-                    <el-form-item label="用户姓名" prop="name">
-                        <el-input v-model="userInfo.name"></el-input>
-                    </el-form-item>
-                    <el-form-item label="车牌号码" prop="plate_num">
-                        <el-input v-model="userInfo.plate_num"></el-input>
-                    </el-form-item>
-                    <el-form-item label="车辆颜色" prop="car_color">
-                        <el-input v-model="userInfo.car_color"></el-input>
-                    </el-form-item>
-                    <el-form-item label="电话号码" prop="tel_num">
-                        <el-input v-model="userInfo.tel_num"></el-input>
-                    </el-form-item>
-                    <el-form-item>
-                        <el-button type="primary" @click="updateUserInfo" :disabled="!isFormChanged">提交修改</el-button>
-                    </el-form-item>
-                </el-form>
-            </el-col>
-        </el-row>
-    </el-card>
+  <PageShell title="基本资料" description="完善有效车牌后即可预约车位"
+    ><section class="surface">
+      <el-form
+        ref="form"
+        :model="model"
+        :rules="rules"
+        label-position="top"
+        style="max-width: 600px"
+        @submit.prevent="save"
+        ><div class="form-grid">
+          <el-form-item label="用户名"
+            ><el-input :model-value="model.user_name" disabled /></el-form-item
+          ><el-form-item label="姓名" prop="name"
+            ><el-input v-model="model.name" maxlength="10" /></el-form-item
+          ><el-form-item label="车牌号" prop="plate_num"
+            ><el-input
+              v-model="model.plate_num"
+              placeholder="京A-12345"
+              maxlength="10" /></el-form-item
+          ><el-form-item label="车辆颜色" prop="car_color"
+            ><el-input v-model="model.car_color" placeholder="白色" maxlength="6" /></el-form-item
+          ><el-form-item label="手机号" prop="tel_num"
+            ><el-input v-model="model.tel_num" maxlength="11"
+          /></el-form-item>
+        </div>
+        <el-button type="primary" native-type="submit" :loading="busy">保存资料</el-button></el-form
+      >
+    </section></PageShell
+  >
 </template>
-
-
-<style lang="scss" scoped>
-.page-container {
-    min-height: 100%;
-    box-sizing: border-box;
-
-    .header {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-    }
-}
-</style>

@@ -92,7 +92,9 @@ public class AdminController {
         //管理员不用判断原密码是否正确原密码是否正确
         Map<String, Object> map = ThreadLocalUtil.get();
         String adminname = (String) map.get("adminname");
-        //更新密码
+        var current=adminService.findByAdminName(adminname);
+        if(current==null || !Md5Util.checkPassword(params.get("old_pwd"),current.getPassword())) return Result.error("原密码错误");
+        if(newPwd.equals(params.get("old_pwd"))) return Result.error("新密码不能与原密码相同");
         adminService.updatePassword(newPwd);
         //删除redis中对应的token
         ValueOperations<String, String> operations = stringRedisTemplate.opsForValue();
@@ -173,6 +175,7 @@ public class AdminController {
             return Result.error("非超级管理员不能删除");
         }
         adminService.deleteAdmin(admin_name);
+        stringRedisTemplate.delete("admin="+admin_name);
         return Result.success();
     }
 
@@ -184,6 +187,7 @@ public class AdminController {
         if(permissions!=1){
             return Result.error("非超级管理员，不能添加");
         }
+        if(admin.getAdmin_name()==null || !admin.getAdmin_name().matches("^\\S{3,16}$")) throw new IllegalArgumentException("管理员账号需为3至16位非空白字符");
         Admin findAdmin = adminService.findByAdminName(admin.getAdmin_name());
         if(findAdmin!=null){
             return  Result.error("该管理员已存在，请换个管理员名添加");

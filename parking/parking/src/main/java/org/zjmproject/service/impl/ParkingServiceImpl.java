@@ -13,19 +13,29 @@ import java.util.List;
 
 @Service
 public class ParkingServiceImpl implements ParkingService {
+    @Autowired private org.zjmproject.service.ReadCache cache;
+    @Autowired private org.springframework.jdbc.core.JdbcTemplate db;
+    private void validate(Parking p) {
+        if(p.getPark_name()==null || p.getPark_name().isBlank() || p.getPark_name().length()>20 || p.getPark_address()==null || p.getPark_address().isBlank() || p.getPark_address().length()>40 || p.getPark_storey()==null || p.getPark_storey()<1 || p.getPark_storey()>100 || p.getRule_id()==null || p.getAdmin_id()==null) throw new IllegalArgumentException("停车场名称、地址、楼层、规则或管理员无效");
+    }
     @Autowired
     private ParkingMapper parkingMapper;
 
     @Override
     public void addParking(Parking parking) {
+        validate(parking);
         if(parking.getPark_storey()==null || parking.getPark_storey()<1) throw new IllegalArgumentException("停车场至少需要一层");
         parking.setPark_mount(0); parking.setPark_spare(0);
-        parkingMapper.addParking(parking);
+        parkingMapper.addParking(parking);cache.invalidateAfterCommit("catalog");
     }
 
     @Override
+    @org.springframework.transaction.annotation.Transactional
     public void updateParking(Parking parking) {
-        parkingMapper.updateParking(parking);
+        validate(parking);
+        db.queryForObject("select id from parking where id=? for update",Integer.class,parking.getId());
+        if(db.queryForObject("select coalesce(max(spaces_storey),0) from spaces where park_id=?",Integer.class,parking.getId())>parking.getPark_storey()) throw new IllegalArgumentException("现有地图超出目标楼层，请先调整地图");
+        parkingMapper.updateParking(parking);cache.invalidateAfterCommit("catalog");cache.invalidateAfterCommit("layout:"+parking.getId());
     }
 
     @Override
@@ -33,7 +43,7 @@ public class ParkingServiceImpl implements ParkingService {
         //创建pageBean对象
         PageBean<Parking> pageBean = new PageBean<>();
         //开启分页查询 PageHelper
-        PageHelper.startPage(pageNum,pageSize);
+        org.zjmproject.utils.PageQuery.start(pageNum,pageSize);
         List<Parking> parkingList = parkingMapper.findAllParking(parkName,parkAddress,adminName,ruleName);
         //Page中提供了方法，可获取PageHelper分页查询后，得到的总记录条数和当前页数据
         Page<Parking> page = (Page<Parking>) parkingList;
@@ -50,7 +60,7 @@ public class ParkingServiceImpl implements ParkingService {
         //创建pageBean对象
         PageBean<Parking> pageBean = new PageBean<>();
         //开启分页查询 PageHelper
-        PageHelper.startPage(pageNum,pageSize);
+        org.zjmproject.utils.PageQuery.start(pageNum,pageSize);
         List<Parking> parkingList = parkingMapper.findParking(parkName,parkAddress,ruleName,adminId);
         //Page中提供了方法，可获取PageHelper分页查询后，得到的总记录条数和当前页数据
         Page<Parking> page = (Page<Parking>) parkingList;
@@ -68,7 +78,7 @@ public class ParkingServiceImpl implements ParkingService {
 
     @Override
     public void deleteParkingByParkingName(String parkName) {
-        parkingMapper.deleteParkingByParkingName(parkName);
+        parkingMapper.deleteParkingByParkingName(parkName);cache.invalidateAfterCommit("catalog");
     }
 
     @Override

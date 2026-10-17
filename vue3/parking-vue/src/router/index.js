@@ -1,5 +1,4 @@
-import {createRouter,createWebHistory} from 'vue-router'
-
+import { createRouter, createWebHistory } from 'vue-router'
 
 //导入组件
 const LoginVue = () => import('@/views/Login.vue')
@@ -30,65 +29,75 @@ import { jwtDecode } from 'jwt-decode'
 
 //定义路由关系
 const routes = [
-    {
-        path: '/',
-        redirect: '/login' // 将根路径重定向到登录页面
-    },
-    {path:'/login',component:LoginVue},
-    {
-        path:'/user',
-        component:UserLayoutVue,
-        redirect:'/user/spaceReservation',
-        //子路由
-        children:[
-            {path:'/user/spaceReservation',component:SpaceReservationVue},
-            {path:'/user/enterHistory',component:EnterHistoryVue},
-            {path:'/user/orderHistory',component:OrderHistoryVue},
-            {path:'/user/rechargeHistory',component:RechargeHistoryVue},
-            {path:'/user/info',component:UserInfoVue},
-            {path:'/user/account',component:UserAccountVue},
-            {path:'/user/avatar',component:UserAvatarVue},
-            {path:'/user/resetPassword',component:UserResetPasswordVue}
-        ]},
-    {
-        path:'/admin',
-        component:AdminLayoutVue,
-        redirect:'/admin/entAndExitManagement',
-        //子路由
-        children:[
-            {path:'/admin/entAndExitManagement',component:EntAndExitManagementVue},
-            {path:'/admin/parkManagement',component:ParkManagementVue},
-            {path:'/admin/ruleManagement',component:RuleManagementVue},
-            {path:'/admin/spaceManagement',component:SpaceManagementVue},
-            {path:'/admin/orderManagement',component:OrderManagementVue},
-            {path:'/admin/rechargesManagement',component:RechargesManagementVue},
-            {path:'/admin/userManagement',component:UserManagementVue},
-            {path:'/admin/adminManagement',component:AdminManagementVue},
-            {path:'/admin/charts',component:ChartsVue}
-        ]}
+  {
+    path: '/',
+    redirect: '/login', // 将根路径重定向到登录页面
+  },
+  { path: '/login', component: LoginVue },
+  {
+    path: '/user',
+    component: UserLayoutVue,
+    redirect: '/user/spaceReservation',
+    //子路由
+    children: [
+      { path: '/user/spaceReservation', component: SpaceReservationVue },
+      { path: '/user/enterHistory', component: EnterHistoryVue },
+      { path: '/user/orderHistory', component: OrderHistoryVue },
+      { path: '/user/rechargeHistory', component: RechargeHistoryVue },
+      { path: '/user/info', component: UserInfoVue },
+      { path: '/user/account', component: UserAccountVue },
+      { path: '/user/avatar', component: UserAvatarVue },
+      { path: '/user/resetPassword', component: UserResetPasswordVue },
+    ],
+  },
+  {
+    path: '/admin',
+    component: AdminLayoutVue,
+    redirect: '/admin/charts',
+    //子路由
+    children: [
+      { path: '/admin/entAndExitManagement', component: EntAndExitManagementVue },
+      { path: '/admin/parkManagement', component: ParkManagementVue },
+      { path: '/admin/ruleManagement', component: RuleManagementVue },
+      { path: '/admin/spaceManagement', component: SpaceManagementVue },
+      { path: '/admin/orderManagement', component: OrderManagementVue },
+      { path: '/admin/rechargesManagement', component: RechargesManagementVue },
+      { path: '/admin/userManagement', component: UserManagementVue },
+      { path: '/admin/adminManagement', component: AdminManagementVue },
+      { path: '/admin/charts', component: ChartsVue },
+      { path: '/admin/security', component: UserResetPasswordVue },
+    ],
+  },
 ]
 
 //创建路由器
 const router = createRouter({
-    history:createWebHistory(),
-    routes:routes
+  history: createWebHistory(),
+  routes: routes,
 })
 
-router.beforeEach(to => {
-    if (to.path === '/login') return true
-    const tokenStore = useTokenStore()
-    try {
-        const decoded = jwtDecode(tokenStore.token)
-        if (!decoded.exp || decoded.exp * 1000 <= Date.now()) throw new Error('expired')
-        const role = decoded.claims?.permissions
-        if (![-1, 0, 1].includes(role)) throw new Error('role')
-        if (to.path.startsWith('/admin') && role === -1) return '/user'
-        if (to.path.startsWith('/user') && role !== -1) return '/admin'
-        return true
-    } catch {
-        tokenStore.removeToken()
-        return '/login'
-    }
+router.beforeEach((to) => {
+  if (to.path === '/login') return true
+  const tokenStore = useTokenStore()
+  try {
+    const decoded = jwtDecode(tokenStore.token)
+    if (!decoded.exp || decoded.exp * 1000 <= Date.now()) throw new Error('expired')
+    const role = decoded.claims?.permissions
+    if (![-1, 0, 1].includes(role)) throw new Error('role')
+    if (to.path.startsWith('/admin') && role === -1) return '/user'
+    if (
+      role === 0 &&
+      ['/admin/userManagement', '/admin/rechargesManagement', '/admin/adminManagement'].includes(
+        to.path,
+      )
+    )
+      return '/admin/charts'
+    if (to.path.startsWith('/user') && role !== -1) return '/admin'
+    return true
+  } catch {
+    tokenStore.removeToken()
+    return '/login'
+  }
 })
 
 //导出路由

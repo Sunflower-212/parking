@@ -40,6 +40,6 @@ public class ChatController {
                 var space=spaces.findSpacesByInfo(request.getParkingName(),request.getSpaces_row(),request.getSpaces_col(),request.getSpaces_storey());
                 if(space==null) throw new IllegalArgumentException("车位不存在");
                 return flow.reserve(actorId,space.getId());
-            }).stream().content();
+            }).stream().content().timeout(java.time.Duration.ofSeconds(60));
     }
 }

@@ -21,6 +21,12 @@ import java.util.Objects;
 @RequestMapping("/rule")
 @Validated
 public class RuleController {
+    @Autowired private org.zjmproject.mapper.RuleMapper mapper;
+    @GetMapping("/pageList") public Result<?> pageList(@RequestParam(defaultValue="1") Integer pageNum,@RequestParam(defaultValue="20") Integer pageSize,@RequestParam(required=false) String rule_name){
+        org.zjmproject.utils.PageQuery.start(pageNum,pageSize);
+        com.github.pagehelper.PageHelper.orderBy("id desc");
+        var rows=mapper.rules(rule_name);var page=(com.github.pagehelper.Page<Rule>)rows;org.zjmproject.pojo.PageBean<Rule> result=new org.zjmproject.pojo.PageBean<>();result.setTotal(page.getTotal());result.setItems(page.getResult());return Result.success(result);
+    }
     @Autowired
     private RuleService ruleService;
     @Autowired

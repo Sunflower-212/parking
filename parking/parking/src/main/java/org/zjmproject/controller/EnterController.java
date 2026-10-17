@@ -20,6 +20,8 @@ import java.util.regex.*;
 @RestController
 @RequestMapping("/enter")
 public class EnterController {
+    public record ReservationRequest(Integer id) {}
+    @Autowired private org.zjmproject.service.DashboardService dashboard;
     @Autowired private ParkingFlowService flow;
     @Autowired private AccessGuard access;
     @Autowired private PlateUploadService uploads;
@@ -118,9 +120,9 @@ public class EnterController {
 
     @Transactional
     @PatchMapping("/reservation")
-    public Result reservation(@RequestBody Spaces spaces) {
-        if(spaces.getId()==null) throw new IllegalArgumentException("请选择车位");
-        return Result.success(flow.reserve(AccessGuard.userId(),spaces.getId()));
+    public Result reservation(@RequestBody ReservationRequest spaces) {
+        if(spaces.id()==null) throw new IllegalArgumentException("请选择车位");
+        return Result.success(flow.reserve(AccessGuard.userId(),spaces.id()));
     }
 
     @GetMapping("/allNumber")
@@ -149,58 +151,23 @@ public class EnterController {
         return Result.success(allEnterNumber);
     }
 
-    @GetMapping("/allData")
-    public Result allData(){
-        Map<String,Object> map = ThreadLocalUtil.get();
-        Integer permissions = (Integer) map.get("permissions");
-        if(permissions!=1 && permissions!=0){
-            return Result.error("权限错误");
-        }
-        LocalDate today = LocalDate.now();
-        List<LocalDate> localDateList = new ArrayList<>();
-        List<Dict> dictList = new ArrayList<>();
-        for(int i=6;i>=0;i--){
-            localDateList.add(today.minusDays(i));
-        }
-        for(LocalDate localDate:localDateList){
-            List<Enter> enterList = enterService.findEnterListByDate(localDate);
-            if(permissions==0) { java.util.Set<Integer> allowed=parkingService.adminGetParkingList((Integer)map.get("id")).stream().map(Parking::getId).collect(java.util.stream.Collectors.toSet()); enterList=enterList.stream().filter(e->allowed.contains(e.getPark_id())).toList(); }
-            Integer number = enterList.size();
-            Dict dict = Dict.create();
-            dict.set("date",localDate).set("number",number);
-            dictList.add(dict);
-        }
-        return Result.success(dictList);
-
+    @GetMapping("/allData") public Result<?> allData(@RequestParam(required=false) Integer park_id) {
+        Map<String,Object> actor=ThreadLocalUtil.get();
+        var result=dashboard.summary(((Number)actor.get("id")).intValue(),((Number)actor.get("permissions")).intValue(),park_id,7);
+        var output=new java.util.ArrayList<Map<String,Object>>();
+        for(var row:(java.util.List<Map<String,Object>>)result.get("series")) {
+            var item=new java.util.LinkedHashMap<String,Object>();item.put("date",row.get("date"));item.put("number",row.get("entered"));output.add(item);
+        }return Result.success(output);
     }
 
-    @GetMapping("/data")
-    public Result data(Integer park_id){
-        Map<String,Object> map = ThreadLocalUtil.get();
-        Integer permissions = (Integer) map.get("permissions");
-        if(permissions!=1 && permissions!=0){
-            return Result.error("权限错误");
-        }
-        access.parking(park_id);
-        Parking parking = parkingService.findParkingById(park_id);
-        if(parking==null){
-            return Result.error("停车场不存在");
-        }
-        LocalDate today = LocalDate.now();
-        List<LocalDate> localDateList = new ArrayList<>();
-        List<Dict> dictList = new ArrayList<>();
-        for(int i=6;i>=0;i--){
-            localDateList.add(today.minusDays(i));
-        }
-        for(LocalDate localDate:localDateList){
-            List<Enter> enterList = enterService.findEnterListByDateAndParkId(park_id,localDate);
-            Integer number = enterList.size();
-            Dict dict = Dict.create();
-            dict.set("date",localDate).set("number",number);
-            dictList.add(dict);
-        }
-        return Result.success(dictList);
-
+    @GetMapping("/data") public Result<?> data(@RequestParam(required=false) Integer park_id) {
+        Map<String,Object> actor=ThreadLocalUtil.get();
+        var result=dashboard.summary(((Number)actor.get("id")).intValue(),((Number)actor.get("permissions")).intValue(),park_id,7);
+        var output=new java.util.ArrayList<Map<String,Object>>();
+        for(var row:(java.util.List<Map<String,Object>>)result.get("series")) {
+            var item=new java.util.LinkedHashMap<String,Object>();item.put("date",row.get("date"));item.put("number",row.get("entered"));output.add(item);
+        }return Result.success(output);
     }
+
 
 }

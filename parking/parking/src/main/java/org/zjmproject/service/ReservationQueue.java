@@ -23,11 +23,15 @@ public class ReservationQueue {
     private final JdbcTemplate db;
     private final ParkingFlowService flow;
     private final Clock clock;
+    private final io.micrometer.core.instrument.MeterRegistry metrics;
     private final ScheduledExecutorService dispatch=Executors.newSingleThreadScheduledExecutor(r->{Thread t=new Thread(r,"reservation-dispatch");t.setDaemon(true);return t;});
     private final ExecutorService consumer=Executors.newSingleThreadExecutor(r->{Thread t=new Thread(r,"reservation-consumer");t.setDaemon(true);return t;});
     private final AtomicBoolean recoveryQueued=new AtomicBoolean();
     private volatile boolean running;
-    public ReservationQueue(RedissonClient redis,JdbcTemplate db,ParkingFlowService flow,Clock clock) {this.redis=redis;this.db=db;this.flow=flow;this.clock=clock;}
+    public ReservationQueue(RedissonClient redis,JdbcTemplate db,ParkingFlowService flow,Clock clock,io.micrometer.core.instrument.MeterRegistry metrics) {
+        this.redis=redis;this.db=db;this.flow=flow;this.clock=clock;this.metrics=metrics;
+        io.micrometer.core.instrument.Gauge.builder("parking.reservation.outbox.pending",db,x->x.queryForObject("select count(*) from reservation_event where completed_at is null",Long.class)).register(metrics);
+    }
     @TransactionalEventListener
     public void created(ParkingFlowService.ReservationCreated event) { schedule(event.id(),0); }
     private void schedule(int id,int attempt) {
@@ -41,6 +45,7 @@ public class ReservationQueue {
             redis.getDelayedQueue(redis.<String>getBlockingDeque(READY)).offer(Integer.toString(id),millis,TimeUnit.MILLISECONDS);
             db.update("update reservation_event set delivered_at=now(),last_error=null where reservation_id=?",id);
         } catch(Exception e) {
+            metrics.counter("parking.reservation.dispatch.failure").increment();
             log.warn("Reservation {} dispatch attempt {} failed ({})",id,attempt,e.getClass().getSimpleName());
             try {db.update("update reservation_event set attempts=attempts+1,last_error=? where reservation_id=?",e.getClass().getSimpleName(),id);} catch(Exception ignored) { }
             schedule(id,attempt+1);
@@ -60,11 +65,17 @@ public class ReservationQueue {
         dispatch.execute(()->{
             try {
                 RDeque<String> processing=redis.getDeque(PROCESSING);
-                for(String value:processing.readAll()) {
-                    redis.<String>getBlockingDeque(READY).addFirst(value);
-                    processing.removeFirstOccurrence(value);
+                int interrupted=processing.size();
+                for(int recovered=0;recovered<interrupted && running;recovered++) {
+                    if(processing.pollLastAndOfferFirstTo(READY)==null) break;
                 }
-                db.queryForList("select reservation_id from reservation_event where completed_at is null",Integer.class).forEach(id->deliver(id,0));
+                int after=0;
+                while(running) {
+                    var batch=db.queryForList("select reservation_id from reservation_event where completed_at is null and reservation_id>? order by reservation_id limit 500",Integer.class,after);
+                    if(batch.isEmpty()) break;
+                    for(int id:batch) deliver(id,0);
+                    after=batch.get(batch.size()-1);
+                }
                 log.info("Reservation recovery complete");
             } catch(Exception e) {
                 log.warn("Reservation recovery failed ({})",e.getClass().getSimpleName());
@@ -81,6 +92,7 @@ public class ReservationQueue {
                 if(value==null) continue;
                 try { flow.expire(Integer.parseInt(value)); processing.removeFirstOccurrence(value); }
                 catch(Exception e) {
+                    metrics.counter("parking.reservation.processing.failure").increment();
                     log.warn("Reservation {} processing failed ({})",value,e.getClass().getSimpleName());
                     // Retry is persisted before acknowledging the processing copy.
                     redis.getDelayedQueue(ready).offer(value,5,TimeUnit.SECONDS);

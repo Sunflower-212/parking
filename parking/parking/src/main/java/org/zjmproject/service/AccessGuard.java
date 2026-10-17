@@ -19,7 +19,12 @@ public class AccessGuard {
         if(actor==null) throw new IllegalArgumentException("请先登录");
         int role=((Number)actor.get("permissions")).intValue();
         if(role==1) return;
-        if(role!=0 || db.queryForObject("select count(*) from parking where id=? and admin_id=?",Integer.class,id,actor.get("id"))!=1)
+        if(role!=0) throw new IllegalArgumentException("无权操作此停车场");
+        // A locking read observes a concurrent ownership transfer even when this
+        // transaction has already established an older repeatable-read snapshot.
+        String lock=org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive()?" for update":"";
+        var owners=db.queryForList("select admin_id from parking where id=?"+lock,Integer.class,id);
+        if(owners.size()!=1 || owners.get(0)!=((Number)actor.get("id")).intValue())
             throw new IllegalArgumentException("无权操作此停车场");
     }
 }

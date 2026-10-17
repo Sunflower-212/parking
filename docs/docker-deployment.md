@@ -7,7 +7,8 @@
 | frontend | Node 22 构建，Nginx 1.28.0 提供页面 | 镜像内静态文件 |
 | backend | Maven 3.9.11 构建，Java 17 运行 | 默认上传目录仅用于临时识别文件 |
 | mysql | MySQL 8.4.4 | `mysql-data` 命名卷 |
-| redis | Redis 7.4.2，密码认证、AOF everysec | `redis-data` 命名卷 |
+| redis | Redis 7.4.2，Token/队列，AOF everysec、noeviction | `redis-data` 命名卷 |
+| redis-cache | Redis 7.4.2，256 MiB、allkeys-lfu，只读业务缓存 | 无需备份，可重建 |
 
 Windows 使用运行中的 Docker Desktop，切换为 Linux 容器并启用 WSL2。Linux 安装 Docker Engine 和 Compose 插件。首次构建需要能够访问 Docker Hub、Maven Central 和 npm registry。
 
@@ -24,7 +25,7 @@ docker compose up -d --build --wait
 docker compose ps
 ```
 
-Linux 可将 `python` 换成 `python3`。初始化脚本仅在 `.env` 不存在时生成随机凭据，不覆盖旧配置。
+Linux 可将 `python` 换成 `python3`。初始化脚本在 `.env` 不存在时生成随机凭据；已有文件保留原值，仅补充缺失的 `CACHE_REDIS_PASSWORD`。
 
 默认访问 http://localhost:8088。首次超级管理员凭据保存在 `.env`。登录后先配置规则、停车场和车位。后端健康检查为 `/api/actuator/health`。
 
@@ -43,7 +44,11 @@ MySQL 和 Redis 默认没有宿主机端口，后端通过容器服务名连接�
 | --- | --- |
 | `MYSQL_ROOT_PASSWORD` | MySQL 管理密码；本地生成 |
 | `DB_PASSWORD` | parking 数据库账号密码 |
-| `REDIS_PASSWORD` | Redis 认证密码 |
+| `REDIS_PASSWORD` | Token/队列 Redis 认证密码 |
+| `CACHE_REDIS_PASSWORD` | 独立缓存 Redis 密码 |
+| `MYSQL_BUFFER_POOL_SIZE` / `MYSQL_MAX_CONNECTIONS` | 默认 `1G` / `100` |
+| `DB_POOL_SIZE` | 默认 `20` |
+| `REDIS_STATE_MEMORY` / `REDIS_CACHE_MEMORY` | 默认 `512mb` / `256mb` |
 | `JWT_SECRET` | 至少 32 字符的随机签名密钥 |
 | `BOOTSTRAP_ADMIN_USERNAME` | 首次管理员名称，3 至 16 位 |
 | `BOOTSTRAP_ADMIN_PASSWORD` | 首次管理员密码，8 至 16 位；仅初始化时使用 |
@@ -116,7 +121,8 @@ $env:PATH = "$env:JAVA_HOME\bin;$env:PATH"
 2. 停止全部旧后端实例，避免旧扫描任务或旧写入流程继续改变车位。
 3. 在数据库副本验证迁移，再对目标数据库执行 `database/migrations/002-reservation-queue.sql`。
 4. 查询 `migration_report`。存在无法唯一匹配的有效记录时，迁移会中止；必须人工核查，不得直接删除占用或随意指定车位。
-5. 无未解决报告后，再启动新后端；检查健康、队列恢复日志和余位。
+5. 已完成预约队列迁移的版本继续执行 `database/migrations/003-performance-indexes.sql`；索引迁移可重复执行，不修改业务记录。
+6. 运行 `python scripts/init-env.py` 补充缓存密码，然后启动新版本；检查健康、队列恢复日志和余位。
 
 不要对已有库运行 `database/init/001-schema.sql`。初始化目录只用于空数据卷首次启动。迁移脚本中的 `30 MINUTE` 是旧预约的原业务时限，不随新预约时限配置改变。
 
@@ -170,3 +176,38 @@ docker compose up -d
 | 刷新子路由异常 | 使用仓库 Nginx 配置，保留 `try_files` 回退 |
 
 排查队列时查看事件 ID、重试次数与异常类型即可，不需要打印密钥、JWT、支付私钥或完整第三方请求。
+
+## 本轮优化升级和回退
+
+由上一版队列服务升级时，只需备份、执行 `003-performance-indexes.sql`，补充缓存密码并重新构建启动。新环境初始化已包含这些索引，无需再跑增量迁移。
+
+Windows PowerShell 7：
+
+```powershell
+python scripts/init-env.py
+docker compose stop backend frontend
+Get-Content -Raw -Encoding UTF8 database/migrations/003-performance-indexes.sql |
+  docker compose exec -T mysql sh -c 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec mysql -uroot --default-character-set=utf8mb4 parking_springboot'
+docker compose up -d --build --wait
+```
+
+Linux：
+
+```sh
+python3 scripts/init-env.py
+docker compose stop backend frontend
+docker compose exec -T mysql sh -c 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec mysql -uroot --default-character-set=utf8mb4 parking_springboot' < database/migrations/003-performance-indexes.sql
+docker compose up -d --build --wait
+```
+
+升级前可使用 `docker image tag parking-backend parking-backend:before-upgrade` 和对应前端命令保留镜像。回退时将保留的镜像重新标记为当前服务镜像，运行 `docker compose up -d --no-build`。索引本身兼容上一版，无须删索引或恢复旧数据；若还涉及更早的结构迁移，使用升级前备份恢复并核对记录。
+
+缓存 Redis 可独立停止或重启，后端会回源并记录告警；Token/队列 Redis 故障时登录校验返回 503，前端不会因此清除会话。不要将状态 Redis 改为 LFU/LRU 淘汰，否则可能淘汰 Token 或队列。
+
+`compose.dev.yml` 的回环端口为 MySQL 3307、状态 Redis 6380、缓存 Redis 6381、后端 8080。`compose.test.yml` 使用 23307/26380/26381/28080/28088，配合项目名 `parking-verification` 隔离数据卷；性能测试使用 `parking-benchmark` 项目及 13307/16380/16381/18080/18088。
+
+验证栈使用 Compose 2.24.4 以上的 `!override` 端口语法。正常结束可运行 `docker compose -p parking-verification -f compose.yml -f compose.test.yml down`，保留其数据卷，不影响默认项目。
+
+`/api/actuator/metrics` 仅超级管理员可访问，包含 HTTP 耗时、Hikari 连接池、缓存命中/失败和预约待处理/重试指标。待处理 SQL 指标仅在读取指标时聚合，不用于周期扫描预约或触发过期处理。日志和请求头的 `X-Request-ID` 用于排障，不记录请求 Token 和密钥。
+
+默认容器内存上限：MySQL 2 GiB、后端 2 GiB、状态 Redis 1.5 GiB、缓存 Redis 512 MiB、Nginx 256 MiB；对应 `.env.example` 中的 `*_MEMORY_LIMIT` / `*_LIMIT` 可调整。后端默认 `MaxRAMPercentage=50`，在 2 GiB 容器中允许约 1 GiB 堆，保留本地内存空间。Redis 的容器上限高于 `maxmemory`，为协议缓冲和 AOF 重写留出余量。性能测试另行固定 JVM 1 GiB 和 MySQL 缓冲池 1 GiB，不把空载资源值当作容量上限。

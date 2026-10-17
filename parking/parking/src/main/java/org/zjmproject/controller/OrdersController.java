@@ -26,6 +26,7 @@ import java.util.regex.Pattern;
 @RestController
 @RequestMapping("/orders")
 public class OrdersController {
+    @Autowired private org.zjmproject.service.DashboardService dashboard;
     @Autowired private ParkingFlowService flow;
     @Autowired private AccessGuard access;
     @Autowired private PlateUploadService uploads;
@@ -50,6 +51,15 @@ public class OrdersController {
         return Result.success(flow.exit(uploads.recognize(file),park_id));
     }
 
+    @GetMapping("/userPageList")
+    public Result<PageBean<Orders>> userPageList(@RequestParam(defaultValue="1") Integer pageNum,@RequestParam(defaultValue="20") Integer pageSize,@RequestParam(required=false) String park_name,@RequestParam(required=false) LocalDateTime start_time,@RequestParam(required=false) LocalDateTime end_time) {
+        int id=AccessGuard.userId();org.zjmproject.utils.PageQuery.range(start_time,end_time);
+        org.zjmproject.utils.PageQuery.start(pageNum,pageSize);
+        var rows=ordersService.userGetOrdersList(id,park_name,start_time,end_time);
+        var page=(com.github.pagehelper.Page<Orders>)rows;
+        PageBean<Orders> result=new PageBean<>();result.setTotal(page.getTotal());result.setItems(page.getResult());return Result.success(result);
+    }
+
     @GetMapping("/userList")
     public Result<List<Orders>> userGetOrdersList(
             @RequestParam (required = false) String park_name,
@@ -62,7 +72,10 @@ public class OrdersController {
         if(permissions!=-1){
             return Result.error("管理员无法访问");
         }
+        org.zjmproject.utils.PageQuery.range(start_time,end_time);
+        com.github.pagehelper.PageHelper.startPage(1,101,false);
         List<Orders> ordersList = ordersService.userGetOrdersList(id,park_name,start_time,end_time);
+        if(ordersList.size()>100) return Result.error("记录超过100条，请使用分页接口");
         return Result.success(ordersList);
     }
 
@@ -116,108 +129,40 @@ public class OrdersController {
         return Result.success(allExitNumber);
     }
 
-    @GetMapping("/exitAllData")
-    public Result exitAllData(){
-        Map<String,Object> map = ThreadLocalUtil.get();
-        Integer permissions = (Integer) map.get("permissions");
-        if(permissions!=1 && permissions!=0){
-            return Result.error("权限错误");
-        }
-        LocalDate today = LocalDate.now();
-        List<LocalDate> localDateList = new ArrayList<>();
-        List<Dict> dictList = new ArrayList<>();
-        for(int i=6;i>=0;i--){
-            localDateList.add(today.minusDays(i));
-        }
-        for(LocalDate localDate:localDateList){
-            List<Orders> enterList = ordersService.findExitListByDate(localDate);
-            if(permissions==0) { java.util.Set<Integer> allowed=parkingService.adminGetParkingList((Integer)map.get("id")).stream().map(Parking::getId).collect(java.util.stream.Collectors.toSet()); enterList=enterList.stream().filter(e->allowed.contains(e.getPark_id())).toList(); }
-            Integer number = enterList.size();
-            Dict dict = Dict.create();
-            dict.set("date",localDate).set("number",number);
-            dictList.add(dict);
-        }
-        return Result.success(dictList);
+    @GetMapping("/exitAllData") public Result<?> exitAllData(@RequestParam(required=false) Integer park_id) {
+        Map<String,Object> actor=ThreadLocalUtil.get();
+        var result=dashboard.summary(((Number)actor.get("id")).intValue(),((Number)actor.get("permissions")).intValue(),park_id,7);
+        var output=new java.util.ArrayList<Map<String,Object>>();
+        for(var row:(java.util.List<Map<String,Object>>)result.get("series")) {
+            var item=new java.util.LinkedHashMap<String,Object>();item.put("date",row.get("date"));item.put("number",row.get("exited"));output.add(item);
+        }return Result.success(output);
     }
 
-    @GetMapping("/exitData")
-    public Result exitData(Integer park_id){
-        Map<String,Object> map = ThreadLocalUtil.get();
-        Integer permissions = (Integer) map.get("permissions");
-        if(permissions!=1 && permissions!=0){
-            return Result.error("权限错误");
-        }
-        access.parking(park_id);
-        Parking parking = parkingService.findParkingById(park_id);
-        if(parking==null){
-            return Result.error("停车场不存在");
-        }
-        LocalDate today = LocalDate.now();
-        List<LocalDate> localDateList = new ArrayList<>();
-        List<Dict> dictList = new ArrayList<>();
-        for(int i=6;i>=0;i--){
-            localDateList.add(today.minusDays(i));
-        }
-        for(LocalDate localDate:localDateList){
-            List<Orders> enterList = ordersService.findExitListByDateAndParkId(park_id,localDate);
-            Integer number = enterList.size();
-            Dict dict = Dict.create();
-            dict.set("date",localDate).set("number",number);
-            dictList.add(dict);
-        }
-        return Result.success(dictList);
+    @GetMapping("/exitData") public Result<?> exitData(@RequestParam(required=false) Integer park_id) {
+        Map<String,Object> actor=ThreadLocalUtil.get();
+        var result=dashboard.summary(((Number)actor.get("id")).intValue(),((Number)actor.get("permissions")).intValue(),park_id,7);
+        var output=new java.util.ArrayList<Map<String,Object>>();
+        for(var row:(java.util.List<Map<String,Object>>)result.get("series")) {
+            var item=new java.util.LinkedHashMap<String,Object>();item.put("date",row.get("date"));item.put("number",row.get("exited"));output.add(item);
+        }return Result.success(output);
     }
 
-    @GetMapping("/allData")
-    public Result allData(){
-        Map<String,Object> map = ThreadLocalUtil.get();
-        Integer permissions = (Integer) map.get("permissions");
-        if(permissions!=1 && permissions!=0){
-            return Result.error("权限错误");
-        }
-        LocalDate today = LocalDate.now();
-        List<LocalDate> localDateList = new ArrayList<>();
-        List<Dict> dictList = new ArrayList<>();
-        for(int i=6;i>=0;i--){
-            localDateList.add(today.minusDays(i));
-        }
-        for(LocalDate localDate:localDateList){
-            List<Orders> enterList = ordersService.findExitListByDate(localDate);
-            if(permissions==0) { java.util.Set<Integer> allowed=parkingService.adminGetParkingList((Integer)map.get("id")).stream().map(Parking::getId).collect(java.util.stream.Collectors.toSet()); enterList=enterList.stream().filter(e->allowed.contains(e.getPark_id())).toList(); }
-            BigDecimal value = enterList.stream().map(Orders::getMoneys).reduce(BigDecimal.ZERO, BigDecimal::add);
-            Dict dict = Dict.create();
-            dict.set("date",localDate).set("value",value);
-            dictList.add(dict);
-        }
-        return Result.success(dictList);
+    @GetMapping("/allData") public Result<?> allData(@RequestParam(required=false) Integer park_id) {
+        Map<String,Object> actor=ThreadLocalUtil.get();
+        var result=dashboard.summary(((Number)actor.get("id")).intValue(),((Number)actor.get("permissions")).intValue(),park_id,7);
+        var output=new java.util.ArrayList<Map<String,Object>>();
+        for(var row:(java.util.List<Map<String,Object>>)result.get("series")) {
+            var item=new java.util.LinkedHashMap<String,Object>();item.put("date",row.get("date"));item.put("value",row.get("revenue"));output.add(item);
+        }return Result.success(output);
     }
 
-    @GetMapping("/data")
-    public Result data(Integer park_id){
-        Map<String,Object> map = ThreadLocalUtil.get();
-        Integer permissions = (Integer) map.get("permissions");
-        if(permissions!=1 && permissions!=0){
-            return Result.error("权限错误");
-        }
-        access.parking(park_id);
-        Parking parking = parkingService.findParkingById(park_id);
-        if(parking==null){
-            return Result.error("停车场不存在");
-        }
-        LocalDate today = LocalDate.now();
-        List<LocalDate> localDateList = new ArrayList<>();
-        List<Dict> dictList = new ArrayList<>();
-        for(int i=6;i>=0;i--){
-            localDateList.add(today.minusDays(i));
-        }
-        for(LocalDate localDate:localDateList){
-            List<Orders> enterList = ordersService.findExitListByDateAndParkId(park_id,localDate);
-            BigDecimal value = enterList.stream().map(Orders::getMoneys).reduce(BigDecimal.ZERO, BigDecimal::add);
-            Dict dict = Dict.create();
-            dict.set("date",localDate).set("value",value);
-            dictList.add(dict);
-        }
-        return Result.success(dictList);
+    @GetMapping("/data") public Result<?> data(@RequestParam(required=false) Integer park_id) {
+        Map<String,Object> actor=ThreadLocalUtil.get();
+        var result=dashboard.summary(((Number)actor.get("id")).intValue(),((Number)actor.get("permissions")).intValue(),park_id,7);
+        var output=new java.util.ArrayList<Map<String,Object>>();
+        for(var row:(java.util.List<Map<String,Object>>)result.get("series")) {
+            var item=new java.util.LinkedHashMap<String,Object>();item.put("date",row.get("date"));item.put("value",row.get("revenue"));output.add(item);
+        }return Result.success(output);
     }
 
 

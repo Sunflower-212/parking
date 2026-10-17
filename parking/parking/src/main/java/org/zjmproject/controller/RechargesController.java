@@ -9,6 +9,7 @@ import org.zjmproject.pojo.PageBean;
 import org.zjmproject.pojo.Recharges;
 import org.zjmproject.pojo.Result;
 import org.zjmproject.service.RechargesService;
+import org.zjmproject.service.AccessGuard;
 import org.zjmproject.utils.ThreadLocalUtil;
 
 import java.time.LocalDate;
@@ -21,8 +22,18 @@ import java.util.Map;
 @RestController
 @RequestMapping("/recharges")
 public class RechargesController {
+    @Autowired private org.zjmproject.service.DashboardService dashboard;
     @Autowired
     private RechargesService rechargesService;
+
+    @GetMapping("/userPageList")
+    public Result<PageBean<Recharges>> userPageList(@RequestParam(defaultValue="1") Integer pageNum,@RequestParam(defaultValue="20") Integer pageSize,@RequestParam(required=false) BigDecimal amounts,@RequestParam(required=false) LocalDateTime start_time,@RequestParam(required=false) LocalDateTime end_time) {
+        int id=AccessGuard.userId();org.zjmproject.utils.PageQuery.range(start_time,end_time);
+        org.zjmproject.utils.PageQuery.start(pageNum,pageSize);
+        var rows=rechargesService.findRechargesByUserId(id,amounts,start_time,end_time);
+        var page=(com.github.pagehelper.Page<Recharges>)rows;
+        PageBean<Recharges> result=new PageBean<>();result.setTotal(page.getTotal());result.setItems(page.getResult());return Result.success(result);
+    }
 
     @GetMapping("/userList")
     public Result<List<Recharges>> userRechargesList(
@@ -36,7 +47,10 @@ public class RechargesController {
         if(permissions!=-1){
             return Result.error("管理员无法访问");
         }
+        org.zjmproject.utils.PageQuery.range(start_time,end_time);
+        com.github.pagehelper.PageHelper.startPage(1,101,false);
         List<Recharges> rechargesList = rechargesService.findRechargesByUserId(id,amounts,start_time,end_time);
+        if(rechargesList.size()>100) return Result.error("记录超过100条，请使用分页接口");
         return Result.success(rechargesList);
     }
     @GetMapping("/pageList")
@@ -54,27 +68,14 @@ public class RechargesController {
         return Result.success(rechargesPageBean);
     }
 
-    @GetMapping("/data")
-    public Result data(){
-        Map<String,Object> map = ThreadLocalUtil.get();
-        Integer permissions = (Integer) map.get("permissions");
-        if(permissions!=1 && permissions!=0){
-            return Result.error("权限错误");
-        }
-        LocalDate today = LocalDate.now();
-        List<LocalDate> localDateList = new ArrayList<>();
-        List<Dict> dictList = new ArrayList<>();
-        for(int i=6;i>=0;i--){
-            localDateList.add(today.minusDays(i));
-        }
-        for(LocalDate localDate:localDateList){
-            List<Recharges> rechargesList = rechargesService.findRechargesListByDate(localDate);
-            BigDecimal num = rechargesList.stream().map(Recharges::getAmounts).reduce(BigDecimal.ZERO, BigDecimal::add);
-            Integer number = rechargesList.size();
-            Dict dict = Dict.create();
-            dict.set("date",localDate).set("value",num).set("number",number);
-            dictList.add(dict);
-        }
-        return Result.success(dictList);
+    @GetMapping("/data") public Result<?> data(@RequestParam(required=false) Integer park_id) {
+        Map<String,Object> actor=ThreadLocalUtil.get();
+        var result=dashboard.summary(((Number)actor.get("id")).intValue(),((Number)actor.get("permissions")).intValue(),park_id,7);
+        var output=new java.util.ArrayList<Map<String,Object>>();
+        for(var row:(java.util.List<Map<String,Object>>)result.get("series")) {
+            var item=new java.util.LinkedHashMap<String,Object>();item.put("date",row.get("date"));item.put("value",row.get("rechargeAmount"));item.put("number",row.get("rechargeCount"));output.add(item);
+        }return Result.success(output);
     }
+
+
 }

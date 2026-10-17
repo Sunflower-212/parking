@@ -44,7 +44,7 @@ public class AdminServiceImpl implements AdminService {
         //创建pageBean对象
         PageBean<Admin> pageBean = new PageBean<>();
         //开启分页查询 PageHelper
-        PageHelper.startPage(pageNum,pageSize);
+        org.zjmproject.utils.PageQuery.start(pageNum,pageSize);
         List<Admin> adminList = adminMapper.pageListFind(adminName,permissions);
         //Page中提供了方法，可获取PageHelper分页查询后，得到的总记录条数和当前页数据
         Page<Admin> page = (Page<Admin>) adminList;

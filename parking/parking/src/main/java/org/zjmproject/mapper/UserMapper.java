@@ -11,6 +11,9 @@ import java.util.Map;
 
 @Mapper
 public interface UserMapper {
+    @Select("select count(*) from user") Long countUsers();
+    @Select("select count(*) from user where create_time>=#{from} and create_time<#{to}") Long countNewUsers(LocalDateTime from,LocalDateTime to);
+    @Update("update user set status=0,update_time=now() where status=1 and vip_end_time<#{now} order by vip_end_time,id limit 500") int expireVip(LocalDateTime now);
     //根据用户名查询用户
     @Select("select * from user where user_name=#{username}")
     User findByUserName(String username);

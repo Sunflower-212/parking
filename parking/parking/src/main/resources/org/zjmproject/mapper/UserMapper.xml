@@ -5,7 +5,7 @@
 <mapper namespace="org.zjmproject.mapper.UserMapper">
     <!--动态sql-->
     <select id="pageListFind" resultType="org.zjmproject.pojo.User">
-        select * from user
+        select id,user_name,name,plate_num,car_color,tel_num,balance,status,user_pic,vip_start_time,vip_end_time,create_time,update_time from user
         <where>
             <if test="plateNum!=null">
                 plate_num like concat('%',#{plateNum},'%')
@@ -20,6 +20,7 @@
                 and user_name like concat('%', #{userName}, '%')
             </if>
         </where>
+    order by create_time desc,id desc
     </select>
 
 </mapper>

@@ -31,11 +31,13 @@ public class AuthenticationInterceptor implements HandlerInterceptor {
             if(role < -1 || role>1 || !(claims.get("id") instanceof Number)) throw new IllegalArgumentException();
             String identity=(String)claims.get(role==-1?"username":"adminname");
             if(identity==null || !token.equals(redis.opsForValue().get((role==-1?"user=":"admin=")+identity))) throw new IllegalArgumentException();
-        } catch(Exception e) {return fail(res,401,"登录已失效，请重新登录");}
+        } catch(org.springframework.dao.DataAccessException e) {return fail(res,503,"登录服务暂不可用，请稍后重试");}
+        catch(Exception e) {return fail(res,401,"登录已失效，请重新登录");}
         int role=((Number)claims.get("permissions")).intValue();
-        boolean userOnly=(path.startsWith("/user/") && !USER_ADMIN.contains(path)) || ENTER_USER.contains(path) || path.equals("/orders/userList") || path.equals("/recharges/userList") || path.startsWith("/ai/");
-        boolean adminOnly=path.startsWith("/admin/") || USER_ADMIN.contains(path) || path.startsWith("/enter/") && !ENTER_USER.contains(path) || path.startsWith("/orders/") && !path.equals("/orders/userList") || path.startsWith("/recharges/") && !path.equals("/recharges/userList") || path.startsWith("/rule/") || path.startsWith("/parking/") && !path.equals("/parking/list") || path.startsWith("/spaces/") && !Set.of("/spaces/get","/spaces/querySpaces").contains(path);
+        boolean userOnly=(path.startsWith("/user/") && !USER_ADMIN.contains(path)) || ENTER_USER.contains(path) || Set.of("/orders/userList","/orders/userPageList").contains(path) || Set.of("/recharges/userList","/recharges/userPageList").contains(path) || path.startsWith("/ai/");
+        boolean adminOnly=path.startsWith("/admin/") || USER_ADMIN.contains(path) || path.startsWith("/enter/") && !ENTER_USER.contains(path) || path.startsWith("/orders/") && !Set.of("/orders/userList","/orders/userPageList").contains(path) || path.startsWith("/recharges/") && !Set.of("/recharges/userList","/recharges/userPageList").contains(path) || path.startsWith("/dashboard/") || path.startsWith("/actuator/") || path.startsWith("/rule/") || path.startsWith("/parking/") && !Set.of("/parking/list","/parking/catalog").contains(path) || path.startsWith("/spaces/") && !Set.of("/spaces/get","/spaces/querySpaces","/spaces/layout","/spaces/availability").contains(path);
         if(userOnly && role!=-1 || adminOnly && role==-1) return fail(res,403,"权限不足");
+        if((USER_ADMIN.contains(path) || path.equals("/recharges/pageList") || path.equals("/recharges/data") || path.startsWith("/actuator/")) && role!=1) return fail(res,403,"需要超级管理员权限");
         if(path.startsWith("/admin/") && !ADMIN_SELF.contains(path) && role!=1) return fail(res,403,"需要超级管理员权限");
         ThreadLocalUtil.set(claims); return true;
     }

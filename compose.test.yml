@@ -1,0 +1,11 @@
+services:
+  mysql:
+    ports: ["127.0.0.1:23307:3306"]
+  redis:
+    ports: ["127.0.0.1:26380:6379"]
+  redis-cache:
+    ports: ["127.0.0.1:26381:6379"]
+  backend:
+    ports: ["127.0.0.1:28080:8080"]
+  frontend:
+    ports: !override ["127.0.0.1:28088:80"]

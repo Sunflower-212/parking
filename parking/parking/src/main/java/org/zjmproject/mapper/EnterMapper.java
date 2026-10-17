@@ -12,6 +12,8 @@ import java.util.Map;
 
 @Mapper
 public interface EnterMapper {
+    @Select("select count(*) from enter where enter_time>=#{from} and enter_time<#{to} and flag<>0") int countToday(LocalDateTime from,LocalDateTime to);
+    @Select("select count(*) from enter where park_id=#{park} and enter_time>=#{from} and enter_time<#{to} and flag<>0") int countTodayPark(int park,LocalDateTime from,LocalDateTime to);
 
 
     @Insert("insert into enter(plate_num, user_id, park_id, enter_time, flag, reservation, update_time) " +

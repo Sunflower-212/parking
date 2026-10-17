@@ -20,6 +20,7 @@ import java.util.List;
 
 @Service
 public class EnterServiceImpl implements EnterService {
+    @Autowired private java.time.Clock clock;
     @Autowired
     private EnterMapper enterMapper;
 
@@ -48,12 +49,12 @@ public class EnterServiceImpl implements EnterService {
         //创建pageBean对象
         PageBean<Enter> pageBean = new PageBean<>();
         //开启分页查询 PageHelper
-        PageHelper.startPage(pageNum,pageSize);
+        org.zjmproject.utils.PageQuery.start(pageNum,pageSize);
         LocalDateTime startDateTime=null;
         LocalDateTime endDateTime=null;
         if(date!=null){
             startDateTime = LocalDateTime.of(date, LocalTime.of(0,0,0));
-            endDateTime = LocalDateTime.of(date,LocalTime.MAX);
+            endDateTime = date.plusDays(1).atStartOfDay();
         }
         List<Enter> enterList = enterMapper.userGetPageList(parkName,id,startDateTime,endDateTime);
         //Page中提供了方法，可获取PageHelper分页查询后，得到的总记录条数和当前页数据
@@ -70,7 +71,7 @@ public class EnterServiceImpl implements EnterService {
         //创建pageBean对象
         PageBean<Enter> pageBean = new PageBean<>();
         //开启分页查询 PageHelper
-        PageHelper.startPage(pageNum,pageSize);
+        org.zjmproject.utils.PageQuery.start(pageNum,pageSize);
         List<Enter> enterList = enterMapper.adminGetPageList(id,plateNum,parkName,flag);
         //Page中提供了方法，可获取PageHelper分页查询后，得到的总记录条数和当前页数据
         Page<Enter> page = (Page<Enter>) enterList;
@@ -86,7 +87,7 @@ public class EnterServiceImpl implements EnterService {
         //创建pageBean对象
         PageBean<Enter> pageBean = new PageBean<>();
         //开启分页查询 PageHelper
-        PageHelper.startPage(pageNum,pageSize);
+        org.zjmproject.utils.PageQuery.start(pageNum,pageSize);
         List<Enter> enterList = enterMapper.rootGetPageList(plateNum,parkName,flag,adminName);
         //Page中提供了方法，可获取PageHelper分页查询后，得到的总记录条数和当前页数据
         Page<Enter> page = (Page<Enter>) enterList;
@@ -134,31 +135,31 @@ public class EnterServiceImpl implements EnterService {
 
     @Override
     public Integer findTodayEnter() {
-        LocalDate today = LocalDate.now();
+        LocalDate today = LocalDate.now(clock);
         LocalDateTime startDateTime = today.atStartOfDay();
-        LocalDateTime endDateTime = today.atTime(LocalTime.MAX);
-        return enterMapper.findTodayEnter(startDateTime,endDateTime).size();
+        LocalDateTime endDateTime = today.plusDays(1).atStartOfDay();
+        return enterMapper.countToday(startDateTime,endDateTime);
     }
 
     @Override
     public Integer findTodayEnterByParkId(Integer parkId) {
-        LocalDate today = LocalDate.now();
+        LocalDate today = LocalDate.now(clock);
         LocalDateTime startDateTime = today.atStartOfDay();
-        LocalDateTime endDateTime = today.atTime(LocalTime.MAX);
-        return enterMapper.findTodayEnterByParkId(parkId,startDateTime,endDateTime).size();
+        LocalDateTime endDateTime = today.plusDays(1).atStartOfDay();
+        return enterMapper.countTodayPark(parkId,startDateTime,endDateTime);
     }
 
     @Override
     public List<Enter> findEnterListByDate(LocalDate localDate) {
         LocalDateTime startDateTime = localDate.atStartOfDay();
-        LocalDateTime endDateTime = localDate.atTime(LocalTime.MAX);
+        LocalDateTime endDateTime = localDate.plusDays(1).atStartOfDay();
         return enterMapper.findTodayEnter(startDateTime,endDateTime);
     }
 
     @Override
     public List<Enter> findEnterListByDateAndParkId(Integer parkId, LocalDate localDate) {
         LocalDateTime startDateTime = localDate.atStartOfDay();
-        LocalDateTime endDateTime = localDate.atTime(LocalTime.MAX);
+        LocalDateTime endDateTime = localDate.plusDays(1).atStartOfDay();
         return enterMapper.findTodayEnterByParkId(parkId,startDateTime,endDateTime);
     }
 

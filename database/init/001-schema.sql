@@ -120,7 +120,7 @@ create table spaces(
                       spaces_flag int unsigned not null comment '车位标记(0-空闲车位，1-被占用车位，2-道路，3-墙壁，4-车辆出入口)',
                       user_name varchar(20) default null comment '使用者姓名',
                       active_enter_id int unsigned null,
-                      unique key uk_space_coordinates(park_id,spaces_col,spaces_row,spaces_storey),
+                      unique key uk_space_coordinates(park_id,spaces_storey,spaces_row,spaces_col),
                       unique key uk_space_entry(active_enter_id),
                       create_time datetime not null comment '创建时间',
                       update_time datetime not null comment '修改时间',
@@ -168,3 +168,44 @@ CREATE TABLE reservation_event (
   FOREIGN KEY(reservation_id) REFERENCES enter(id)
 ) ENGINE=InnoDB;
 CREATE UNIQUE INDEX uk_recharges_provider_trade ON recharges ((nullif(pay_no,'')));
+
+
+-- Query indexes (migration 003).
+CREATE INDEX idx_orders_user_time ON `orders` (user_id,create_time DESC,id DESC);
+CREATE INDEX idx_orders_park_time ON `orders` (park_id,create_time DESC,id DESC);
+CREATE INDEX idx_orders_time ON `orders` (create_time DESC,id DESC);
+CREATE INDEX idx_enter_user_time ON `enter` (user_id,enter_time DESC,id DESC);
+CREATE INDEX idx_enter_park_time ON `enter` (park_id,enter_time DESC,id DESC);
+CREATE INDEX idx_enter_time_flag ON `enter` (enter_time,flag);
+CREATE INDEX idx_spaces_available ON `spaces` (park_id,spaces_flag,active_enter_id,id);
+CREATE INDEX idx_recharges_user_time ON `recharges` (user_id,create_time DESC,id DESC);
+CREATE INDEX idx_recharges_flag_time ON `recharges` (flag,create_time,id);
+CREATE INDEX idx_recharges_time ON `recharges` (create_time DESC,id DESC);
+CREATE INDEX idx_user_created ON `user` (create_time,id);
+CREATE INDEX idx_user_vip_expiry ON `user` (status,vip_end_time,id);
+CREATE INDEX idx_session_user_type_time ON `historicalSession` (userId,type,update_time DESC,id DESC);
+
+-- Reuse the coordinate uniqueness index for floor reads instead of retaining a duplicate.
+DROP PROCEDURE IF EXISTS parking_normalize_indexes;
+DELIMITER $$
+CREATE PROCEDURE parking_normalize_indexes()
+BEGIN
+  IF (SELECT GROUP_CONCAT(column_name ORDER BY seq_in_index) FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name='spaces' AND index_name='uk_space_coordinates') <> 'park_id,spaces_storey,spaces_row,spaces_col' THEN
+    ALTER TABLE spaces DROP INDEX uk_space_coordinates, ADD UNIQUE INDEX uk_space_coordinates(park_id,spaces_storey,spaces_row,spaces_col);
+  END IF;
+  IF EXISTS (SELECT 1 FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name='spaces' AND index_name='idx_spaces_floor') THEN
+    ALTER TABLE spaces DROP INDEX idx_spaces_floor;
+  END IF;
+  IF EXISTS (SELECT 1 FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name='enter' AND index_name='fk_enter_user') THEN
+    ALTER TABLE enter DROP INDEX fk_enter_user;
+  END IF;
+  IF EXISTS (SELECT 1 FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name='enter' AND index_name='fk_enter_park') THEN
+    ALTER TABLE enter DROP INDEX fk_enter_park;
+  END IF;
+  IF EXISTS (SELECT 1 FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name='recharges' AND index_name='fk_recharges_user') THEN
+    ALTER TABLE recharges DROP INDEX fk_recharges_user;
+  END IF;
+END$$
+DELIMITER ;
+CALL parking_normalize_indexes();
+DROP PROCEDURE parking_normalize_indexes;

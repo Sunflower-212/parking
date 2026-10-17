@@ -16,6 +16,7 @@
         <where>
             user_id=#{userId}
         </where>
+    order by o.create_time desc,o.id desc
     </select>
     <select id="adminGetPageList" resultMap="ordersResultMap">
         select
@@ -40,6 +41,7 @@
                 and  <![CDATA[o.create_time < #{endDateTime}]]>
             </if>
         </where>
+    order by o.create_time desc,o.id desc
     </select>
     <select id="rootGetPageList" resultType="org.zjmproject.pojo.Orders">
         select
@@ -69,6 +71,7 @@
                 and a.admin_name like concat('%',#{adminName},'%')
             </if>
         </where>
+    order by o.create_time desc,o.id desc
     </select>
     <select id="userGetOrdersList" resultType="org.zjmproject.pojo.Orders">
         select
@@ -88,10 +91,11 @@
                 and <![CDATA[o.create_time >= #{startTime}]]>
             </if>
             <if test="endTime!=null">
-                and <![CDATA[o.create_time <= #{endTime}]]>
+                and <![CDATA[o.create_time < #{endTime}]]>
             </if>
 
         </where>
+    order by o.create_time desc,o.id desc
     </select>
     <resultMap id="ordersResultMap" type="org.zjmproject.pojo.Orders">
         <result column="id" property="id"/>

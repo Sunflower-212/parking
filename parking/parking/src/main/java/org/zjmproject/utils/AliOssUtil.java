@@ -10,7 +10,9 @@ public final class AliOssUtil {
         if(id==null || id.isBlank() || secret==null || secret.isBlank() || bucket==null || bucket.isBlank() || endpoint==null || endpoint.isBlank()) throw new IllegalStateException("OSS配置不完整");
         URI address=URI.create(endpoint);
         if(!"https".equals(address.getScheme()) || address.getHost()==null) throw new IllegalArgumentException("OSS端点必须为HTTPS地址");
-        OSS client=new OSSClientBuilder().build(endpoint,id,secret);
+        com.aliyun.oss.ClientBuilderConfiguration configuration=new com.aliyun.oss.ClientBuilderConfiguration();
+        configuration.setConnectionTimeout(3000);configuration.setSocketTimeout(15000);configuration.setMaxErrorRetry(1);
+        OSS client=new OSSClientBuilder().build(endpoint,id,secret,configuration);
         try(InputStream stream=input) {
             client.putObject(bucket,name,stream);
             return "https://"+bucket+"."+address.getHost()+"/"+name;
