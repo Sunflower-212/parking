@@ -14,6 +14,7 @@ import org.zjmproject.utils.Md5Util;
 import java.math.BigDecimal;
 import java.sql.Statement;
 import java.time.LocalDateTime;
+import java.time.Clock;
 import java.util.*;
 import java.util.concurrent.*;
 import static org.junit.jupiter.api.Assertions.*;
@@ -31,6 +32,7 @@ class ParkingIntegrationTest {
     @Autowired PaymentService payments;
     @Autowired OrdersService orders;
     @Autowired TestRestTemplate http;
+    @Autowired Clock clock;
     int user,user2,park,park2,space,space2,rule;
     String prefix,plate,plate2;
     int insert(String sql,Object...args) {
@@ -66,7 +68,7 @@ class ParkingIntegrationTest {
         flow.enter(plate,park);assertEquals(1,available());
         assertThrows(IllegalStateException.class,()->flow.cancel(user,reservation.getId()));
         flow.expire(reservation.getId());assertEquals(1,available());
-        db.update("update enter set enter_time=? where id=?",LocalDateTime.now().minusMinutes(70),reservation.getId());
+        db.update("update enter set enter_time=? where id=?",LocalDateTime.now(clock).minusMinutes(70),reservation.getId());
         flow.exit(plate,park);assertEquals(2,available());
         assertEquals(0,new BigDecimal("15.00").compareTo(db.queryForObject("select balance from user where id=?",BigDecimal.class,user)));
         assertThrows(IllegalArgumentException.class,()->flow.exit(plate,park));
@@ -95,7 +97,10 @@ class ParkingIntegrationTest {
         } finally {pool.shutdownNow();}
     }
     @Test void realRedisQueueExpiresReservationsAndRecoveryIsIdempotent() throws Exception {
-        int id=flow.reserve(user,space).getId();queue.reconnected();
+        int id=flow.reserve(user,space).getId();
+        Thread.sleep(200);
+        assertEquals(0,db.queryForObject("select attempts from reservation_event where reservation_id=?",Integer.class,id));
+        queue.reconnected();
         long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(12);
         while(System.nanoTime()<deadline && db.queryForObject("select reservation from enter where id=?",Integer.class,id)==1) Thread.sleep(100);
         assertEquals(2,db.queryForObject("select reservation from enter where id=?",Integer.class,id));
@@ -104,12 +109,12 @@ class ParkingIntegrationTest {
     }
     @Test void expiryIsCheckedAgainstTheDatabaseDeadline() {
         int id=flow.reserve(user,space).getId();assertThrows(IllegalStateException.class,()->flow.expire(id));
-        db.update("update enter set expires_at=? where id=?",LocalDateTime.now().minusSeconds(1),id);
+        db.update("update enter set expires_at=? where id=?",LocalDateTime.now(clock).minusSeconds(1),id);
         flow.expire(id);assertEquals(2,available());
     }
     @Test void processingMessagesAreRecoveredAfterAnInterruptedConsumer() throws Exception {
         int id=flow.reserve(user,space).getId();
-        db.update("update enter set expires_at=? where id=?",LocalDateTime.now().minusSeconds(1),id);
+        db.update("update enter set expires_at=? where id=?",LocalDateTime.now(clock).minusSeconds(1),id);
         // Redis still contains the message after a consumer dies between claim and commit.
         org.redisson.config.Config config=new org.redisson.config.Config();
         config.setCodec(org.redisson.client.codec.StringCodec.INSTANCE);
@@ -136,7 +141,7 @@ class ParkingIntegrationTest {
         }
     }
     @Test void failedExitRollsBackAllState() {
-        flow.enter(plate,park);db.update("update user set balance=0 where id=?",user);db.update("update enter set enter_time=? where user_id=?",LocalDateTime.now().minusHours(2),user);
+        flow.enter(plate,park);db.update("update user set balance=0 where id=?",user);db.update("update enter set enter_time=? where user_id=?",LocalDateTime.now(clock).minusHours(2),user);
         assertThrows(IllegalStateException.class,()->flow.exit(plate,park));
         assertEquals(1,available());assertEquals(1,db.queryForObject("select flag from enter where user_id=?",Integer.class,user));
         assertThrows(IllegalStateException.class,()->flow.exit(plate,park2));

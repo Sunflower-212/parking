@@ -35,7 +35,7 @@ public class ReservationQueue {
     }
     private void deliver(int id,int attempt) {
         try {
-            var rows=db.query("select expires_at from reservation_event where reservation_id=? and completed_at is null",(r,n)->r.getTimestamp(1).toLocalDateTime(),id);
+            var rows=db.query("select expires_at from reservation_event where reservation_id=? and completed_at is null",(r,n)->r.getObject(1,LocalDateTime.class),id);
             if(rows.isEmpty()) return;
             long millis=Math.max(0,Duration.between(LocalDateTime.now(clock),rows.get(0)).toMillis());
             redis.getDelayedQueue(redis.<String>getBlockingDeque(READY)).offer(Integer.toString(id),millis,TimeUnit.MILLISECONDS);

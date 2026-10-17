@@ -324,7 +324,7 @@ public class UserController {
         //将文件存储到本地文件中
         String originalFilename=file.getOriginalFilename();
         //保证每次上传的文件名是唯一的，防止文件覆盖
-        String fileName = UUID.randomUUID()+originalFilename.substring(originalFilename.lastIndexOf("."));
+        String fileName = UUID.randomUUID()+("image/png".equals(file.getContentType())?".png":".jpg");
         //file.transferTo(new File(path));
         String url = AliOssUtil.uploadFile(fileName,file.getInputStream(),aliCloudConfig.getAccessKeyId(),aliCloudConfig.getAccessKeySecret(),aliCloudConfig.getBucketName(),aliCloudConfig.getEndpoint());
         return Result.success(url);

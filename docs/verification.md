@@ -2,6 +2,8 @@
 
 验证日期：2026-10-17，Asia/Shanghai。
 
+另以 UTC 宿主时区运行后端测试，验证计费和延迟队列使用一致的业务时钟及 LocalDateTime 读取方式。
+
 ## 已修复
 
 - Maven 使用 Java 8、旧 HTTP 仓库及项目依赖配置问题；使用 JDK 17、HTTPS 仓库和官方 Maven Wrapper。
