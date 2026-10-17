@@ -15,7 +15,7 @@
 | 超级管理员 | 平台用户、充值流水、管理员账号、所有停车场及共享规则维护 |
 | 后端 | Java 17、Spring Boot 3.4.2、MyBatis、PageHelper 2、Redisson 3.43 |
 | 前端 | Vue 3、Vite、Pinia、Element Plus、ECharts |
-| 基础设施 | MySQL 8.4.4、Redis 7.4.2、Nginx、Docker Compose |
+| 基础设施 | MySQL 8.4.4、Redis 7.4.2、Caffeine 3.1.8、Nginx、Docker Compose |
 | 可选集成 | DeepSeek、百度车牌识别、支付宝沙箱、阿里云 OSS |
 
 外部服务默认关闭，不需要第三方密钥即可启动核心系统。图片识别出入场、真实充值、云头像上传等功能需要启用对应服务。微信支付尚未接入，不提供模拟到账。
@@ -60,6 +60,7 @@ $env:SPRING_CONFIG_NAME = 'application-example'
 $env:DB_URL = 'jdbc:mysql://127.0.0.1:3307/parking_springboot?serverTimezone=Asia/Shanghai'
 $env:REDIS_PORT = '6380'
 $env:CACHE_ENABLED = 'true'
+$env:CACHE_LOCAL_ENABLED = 'true'
 $env:CACHE_REDIS_PORT = '6381'
 cd parking/parking
 .\mvnw.cmd spring-boot:run
@@ -94,6 +95,7 @@ Windows 下完整验证：
 - [Docker 部署手册](docs/docker-deployment.md)：Windows/Linux 部署、配置、迁移和备份恢复。
 - [优化说明](docs/optimization.md)：查询、索引、缓存一致性和性能测试方法。
 - [性能报告](docs/performance-report.md)：百万数据、100 并发及浏览器实测。
+- [简历项目亮点](docs/resume-highlights.md)：可复现的 Java 后端量化表述、指标口径和面试说明。
 - [修复与验证记录](docs/verification.md)：修复内容、测试结果及验证边界。
 
 ## 配置与隐私

@@ -33,11 +33,16 @@ mybatis:
     default-statement-timeout: 5
   mapper-locations: classpath:org/zjmproject/mapper/*.xml
 parking:
+  admission:
+    permits: ${PARKING_ADMISSION_PERMITS:4}
   cache:
     enabled: ${CACHE_ENABLED:false}
     host: ${CACHE_REDIS_HOST:localhost}
     port: ${CACHE_REDIS_PORT:6379}
     password: ${CACHE_REDIS_PASSWORD:}
+    local-enabled: ${CACHE_LOCAL_ENABLED:false}
+    local-ttl: ${CACHE_LOCAL_TTL:1s}
+    local-weight-bytes: ${CACHE_LOCAL_WEIGHT_BYTES:16777216}
   jwt-secret: ${JWT_SECRET}
   reservation-timeout: ${RESERVATION_TIMEOUT:30m}
   upload-dir: ${UPLOAD_DIR:./uploads}

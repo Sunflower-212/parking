@@ -344,7 +344,7 @@ a:focus-visible {
   max-width: calc(100vw - 24px);
 }
 .el-message-box {
-  max-width: calc(100vw - 32px);
+  max-width: min(400px, calc(100vw - 32px));
 }
 @media (max-width: 1100px) {
   .stat-grid {

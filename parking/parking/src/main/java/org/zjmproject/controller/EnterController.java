@@ -110,7 +110,6 @@ public class EnterController {
         return Result.error("权限错误");
     }
 
-    @Transactional
     @PostMapping("/cancelReservation")
     public Result cancelReservation(Integer id) {
         if(id==null) throw new IllegalArgumentException("缺少预约ID");
@@ -118,7 +117,6 @@ public class EnterController {
     }
 
 
-    @Transactional
     @PatchMapping("/reservation")
     public Result reservation(@RequestBody ReservationRequest spaces) {
         if(spaces.id()==null) throw new IllegalArgumentException("请选择车位");

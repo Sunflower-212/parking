@@ -198,3 +198,101 @@ test('user reserves once, cancels, and sees responsive pages and current account
   await expect(page.getByRole('button', { name: '支付宝充值', exact: true })).toBeDisabled()
   expect(errors).toEqual([])
 })
+for (const root of [false, true]) {
+  test(`${root ? 'super' : 'ordinary'} administrator can manage parking records`, async ({
+    page,
+  }) => {
+    await login(
+      page,
+      root ? process.env.BOOTSTRAP_ADMIN_USERNAME : admin,
+      root ? process.env.BOOTSTRAP_ADMIN_PASSWORD : admin,
+      true,
+    )
+    await page.getByRole('link', { name: /停车场管理$/ }).click()
+    await expect(page.getByRole('heading', { name: '停车场管理', exact: true })).toBeVisible()
+    await expect(page.locator('.el-alert--error')).toHaveCount(0)
+    const name = park + (root ? '-r' : '-a')
+    await page.getByRole('button', { name: '新增停车场', exact: true }).click()
+    const dialog = page.getByRole('dialog', { name: '新增记录', exact: true })
+    await dialog.getByRole('textbox', { name: '停车场名称', exact: true }).fill(name)
+    await dialog.getByRole('textbox', { name: '停车场地址', exact: true }).fill('停车场回归地址')
+    if (root) {
+      await dialog.getByRole('combobox', { name: '所属管理员', exact: true }).press('Enter')
+      await page.getByRole('option', { name: admin, exact: true }).click()
+    }
+    await dialog.getByRole('combobox', { name: '计费规则', exact: true }).press('Enter')
+    await page.getByRole('option', { name: park, exact: true }).click()
+    await dialog.getByRole('button', { name: '保存', exact: true }).click()
+    await expect(dialog).not.toBeVisible()
+    await page.getByPlaceholder('请输入停车场', { exact: true }).fill(name)
+    await page.getByRole('button', { name: '搜索', exact: true }).click()
+    const row = page.getByRole('row').filter({ has: page.getByRole('cell', { name, exact: true }) })
+    await expect(row).toBeVisible()
+    await row.getByRole('button', { name: '编辑', exact: true }).click()
+    const edit = page.getByRole('dialog', { name: '编辑记录', exact: true })
+    await edit.getByRole('textbox', { name: '停车场地址', exact: true }).fill('已更新回归地址')
+    await edit.getByRole('button', { name: '保存', exact: true }).click()
+    await expect(edit).not.toBeVisible()
+    await expect(row.getByRole('cell', { name: '已更新回归地址', exact: true })).toBeVisible()
+    await row.getByRole('button', { name: '删除', exact: true }).click()
+    await page.locator('.el-message-box').getByRole('button', { name: '确认', exact: true }).click()
+    await expect(page.getByRole('cell', { name, exact: true })).toHaveCount(0)
+  })
+}
+test('parking option load failure has a retry and prevents invalid creation', async ({ page }) => {
+  await login(page, admin, admin, true)
+  await page.route('**/api/rule/select', (route) =>
+    route.fulfill({
+      status: 503,
+      contentType: 'application/json',
+      body: JSON.stringify({ code: 1, message: '测试服务暂不可用' }),
+    }),
+  )
+  await page.getByRole('link', { name: /停车场管理$/ }).click()
+  await expect(page.getByText('停车场基础选项加载失败，请重试', { exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: '新增停车场', exact: true })).toBeDisabled()
+  await page.unroute('**/api/rule/select')
+  await page.getByRole('button', { name: '重新加载选项', exact: true }).click()
+  await expect(page.getByRole('button', { name: '新增停车场', exact: true })).toBeEnabled()
+})
+for (const isAdmin of [false, true]) {
+  test(`${isAdmin ? 'administrator' : 'user'} logout is compact and preserves the session on cancellation or service failure`, async ({
+    page,
+  }) => {
+    await login(page, isAdmin ? admin : user, isAdmin ? admin : user, isAdmin)
+    for (const width of [375, 768, 1440]) {
+      await page.setViewportSize({ width, height: 900 })
+      await page.getByRole('button', { name: '退出登录', exact: true }).click()
+      const box = page.locator('.el-message-box')
+      await expect(box).toBeVisible()
+      await expect
+        .poll(async () => Math.abs((await box.boundingBox()).width - Math.min(400, width - 32)))
+        .toBeLessThan(1)
+      await box.getByRole('button', { name: '取消', exact: true }).click()
+      await expect(box).not.toBeVisible()
+      await expect(page).not.toHaveURL(/\/login/)
+    }
+    const endpoint = '**/api/' + (isAdmin ? 'admin' : 'user') + '/logout'
+    await page.route(endpoint, (route) =>
+      route.fulfill({
+        status: 503,
+        contentType: 'application/json',
+        body: JSON.stringify({ code: 1, message: '测试退出服务暂不可用' }),
+      }),
+    )
+    await page.getByRole('button', { name: '退出登录', exact: true }).click()
+    await page.locator('.el-message-box').getByRole('button', { name: '退出', exact: true }).click()
+    await expect(page.getByText('测试退出服务暂不可用', { exact: true })).toBeVisible()
+    await page.reload()
+    await expect(page).not.toHaveURL(/\/login/)
+    await page.unroute(endpoint)
+    let calls = 0
+    page.on('request', (req) => {
+      if (req.url().endsWith('/logout')) calls++
+    })
+    await page.getByRole('button', { name: '退出登录', exact: true }).click()
+    await page.locator('.el-message-box').getByRole('button', { name: '退出', exact: true }).click()
+    await expect(page).toHaveURL(/\/login/)
+    expect(calls).toBe(1)
+  })
+}

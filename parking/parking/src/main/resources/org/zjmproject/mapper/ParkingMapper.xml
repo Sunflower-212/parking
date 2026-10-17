@@ -19,16 +19,16 @@
 
         <where>
             <if test="parkName!=null">
-                park_name like concat('%',#{parkName},'%')
+                p.park_name like concat('%',#{parkName},'%')
             </if>
-            <if test="parkAddress != null and parkAddress != \'\'">
-                and park_address like concat('%',#{parkAddress},'%')
+            <if test="parkAddress != null and parkAddress != ''">
+                and p.park_address like concat('%',#{parkAddress},'%')
             </if>
-            <if test="adminName != null and adminName != \'\'">
-                and admin_name like concat('%',#{adminName},'%')
+            <if test="adminName != null and adminName != ''">
+                and a.admin_name like concat('%',#{adminName},'%')
             </if>
-            <if test="ruleName != null and ruleName != \'\'">
-                and rule_name like concat('%',#{ruleName},'%')
+            <if test="ruleName != null and ruleName != ''">
+                and r.rule_name like concat('%',#{ruleName},'%')
             </if>
         </where>
     order by p.id desc
@@ -48,15 +48,15 @@
             admin a on p.admin_id = a.id
         <where>
             <if test="parkName!=null">
-                park_name like concat('%',#{parkName},'%')
+                p.park_name like concat('%',#{parkName},'%')
             </if>
-            <if test="parkAddress != null and parkAddress != \'\'">
-                and park_address like concat('%',#{parkAddress},'%')
+            <if test="parkAddress != null and parkAddress != ''">
+                and p.park_address like concat('%',#{parkAddress},'%')
             </if>
-            <if test="ruleName != null and ruleName != \'\'">
-                and rule_name like concat('%',#{ruleName},'%')
+            <if test="ruleName != null and ruleName != ''">
+                and r.rule_name like concat('%',#{ruleName},'%')
             </if>
-        and admin_id=#{adminId}
+        and p.admin_id=#{adminId}
         </where>
     order by p.id desc
     </select>

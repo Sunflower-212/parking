@@ -48,6 +48,9 @@ MySQL 和 Redis 默认没有宿主机端口，后端通过容器服务名连接�
 | `CACHE_REDIS_PASSWORD` | 独立缓存 Redis 密码 |
 | `MYSQL_BUFFER_POOL_SIZE` / `MYSQL_MAX_CONNECTIONS` | 默认 `1G` / `100` |
 | `DB_POOL_SIZE` | 默认 `20` |
+| `PARKING_ADMISSION_PERMITS` | 默认 `4`，同时受连接池四分之一上限约束；排队在获取事务连接之前 |
+| `CACHE_LOCAL_ENABLED` | Compose 默认 `true`；开关对照满足读取收益和写入回退门槛，见性能报告 |
+| `CACHE_LOCAL_TTL` / `CACHE_LOCAL_WEIGHT_BYTES` | 最多 `1s` / 默认 `16777216` 加权预算，仅用于静态资料 |
 | `REDIS_STATE_MEMORY` / `REDIS_CACHE_MEMORY` | 默认 `512mb` / `256mb` |
 | `JWT_SECRET` | 至少 32 字符的随机签名密钥 |
 | `BOOTSTRAP_ADMIN_USERNAME` | 首次管理员名称，3 至 16 位 |
@@ -203,6 +206,10 @@ docker compose up -d --build --wait
 升级前可使用 `docker image tag parking-backend parking-backend:before-upgrade` 和对应前端命令保留镜像。回退时将保留的镜像重新标记为当前服务镜像，运行 `docker compose up -d --no-build`。索引本身兼容上一版，无须删索引或恢复旧数据；若还涉及更早的结构迁移，使用升级前备份恢复并核对记录。
 
 缓存 Redis 可独立停止或重启，后端会回源并记录告警；Token/队列 Redis 故障时登录校验返回 503，前端不会因此清除会话。不要将状态 Redis 改为 LFU/LRU 淘汰，否则可能淘汰 Token 或队列。
+
+从 `21d3012` 升级本轮停车场修复时，没有新增数据库迁移：先备份、保留旧镜像，再重建前后端即可。候选覆盖索引因更新成本增加约 15.4% 已被排除，无须手工创建。Compose 默认开启 1 秒 Caffeine 元数据缓存；可通过 `CACHE_LOCAL_ENABLED=false` 关闭。多实例部署应关闭本地层或先实现跨实例失效，不能依赖本地清理通知其他实例。
+
+`PARKING_ADMISSION_PERMITS` 默认 4，实际许可不超过 Hikari 最大连接数的四分之一。它限制单个哈希分组进入车辆状态事务的并发数；等待超过 5 秒或队列达到上限时返回 503。排障时同时查看 `parking.admission.wait`、`hikaricp.connections.acquire` 和 `parking.flow.park.lock.hold`，不要只扩大连接池掩盖热点停车场的串行写入。
 
 `compose.dev.yml` 的回环端口为 MySQL 3307、状态 Redis 6380、缓存 Redis 6381、后端 8080。`compose.test.yml` 使用 23307/26380/26381/28080/28088，配合项目名 `parking-verification` 隔离数据卷；性能测试使用 `parking-benchmark` 项目及 13307/16380/16381/18080/18088。
 

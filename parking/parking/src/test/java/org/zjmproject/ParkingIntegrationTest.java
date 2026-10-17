@@ -325,4 +325,90 @@ class ParkingIntegrationTest {
         cache.invalidateAfterCommit("catalog");
         assertEquals(0,get("/spaces/layout?park_id="+park2+"&spaces_storey=1",auth).getBody().get("code"));
     }
+    @Test void parkingPagesSupportEmptyAndCombinedFiltersAndOwnerScope() {
+        int root=db.queryForObject("select min(id) from admin where permissions=1",Integer.class);
+        String superToken=token(root,prefix+"root",1);
+        for(String query:List.of("", "&park_name=&park_address=&admin_name=&rule_name=", "&park_name="+prefix+"&park_address=test&rule_name="+prefix)) {
+            var result=get("/parking/selectAllParking?pageNum=1&pageSize=20"+query,superToken);
+            assertEquals(200,result.getStatusCode().value());assertEquals(0,result.getBody().get("code"));
+        }
+        int owner=insert("insert into admin(admin_name,password,permissions,create_time,update_time) values(?,?,0,now(),now())",prefix+"park",Md5Util.encode("test12345"));
+        try {
+            db.update("update parking set admin_id=? where id=?",owner,park2);
+            String auth=token(owner,prefix+"park",0);
+            for(String filters:List.of("", "&park_name=&park_address=&rule_name=", "&park_name="+prefix+"&park_address=test&rule_name="+prefix)) {
+                var body=get("/parking/selectParking?pageNum=1&pageSize=1"+filters,auth).getBody();assertEquals(0,body.get("code"));
+                var page=(Map)body.get("data");assertEquals(1,((Number)page.get("total")).intValue());assertEquals(park2,((Number)((Map)((List)page.get("items")).get(0)).get("id")).intValue());
+            }
+        }finally{db.update("update parking set admin_id=? where id=?",root,park2);db.update("delete from admin where id=?",owner);}
+    }
+    @Test void parkingCrudValidatesReferencesAndPreservesLinkedRecords() {
+        int root=db.queryForObject("select min(id) from admin where permissions=1",Integer.class);String auth=token(root,prefix+"crud",1);
+        var headers=new HttpHeaders();headers.set("Authorization",auth);headers.setContentType(MediaType.APPLICATION_JSON);
+        var values=new HashMap<String,Object>(Map.of("park_name",prefix+"new","park_address","test","park_storey",1,"admin_id",root,"rule_id",rule));
+        try {
+            values.put("rule_id",2147483647);var invalid=http.postForEntity("/parking/rootAddParking",new HttpEntity<>(values,headers),Map.class);assertEquals(1,invalid.getBody().get("code"));assertTrue(invalid.getBody().get("message").toString().contains("计费规则不存在"));
+            values.put("rule_id",rule);values.put("admin_id",2147483647);assertEquals(1,http.postForEntity("/parking/rootAddParking",new HttpEntity<>(values,headers),Map.class).getBody().get("code"));
+            values.put("admin_id",root);assertEquals(0,http.postForEntity("/parking/rootAddParking",new HttpEntity<>(values,headers),Map.class).getBody().get("code"));
+            int id=db.queryForObject("select id from parking where park_name=?",Integer.class,prefix+"new");values.put("id",id);values.put("park_address","updated");
+            assertEquals(0,http.exchange("/parking/rootUpdateParking",HttpMethod.PUT,new HttpEntity<>(values,headers),Map.class).getBody().get("code"));
+            assertEquals("updated",db.queryForObject("select park_address from parking where id=?",String.class,id));
+            assertEquals(1,http.exchange("/parking/delete?park_name="+prefix,HttpMethod.DELETE,new HttpEntity<>(headers),Map.class).getBody().get("code"));
+            assertEquals(2,db.queryForObject("select count(*) from spaces where park_id=?",Integer.class,park));
+            assertEquals(0,http.exchange("/parking/delete?park_name="+prefix+"new",HttpMethod.DELETE,new HttpEntity<>(headers),Map.class).getBody().get("code"));
+        }finally{db.update("delete from parking where park_name=?",prefix+"new");}
+    }
+    @Test void localMetadataCacheIsBoundedShortLivedAndDoesNotCacheTransactions() throws Exception {
+        var registry=new io.micrometer.core.instrument.simple.SimpleMeterRegistry();
+        var localCache=new ReadCache(new com.fasterxml.jackson.databind.ObjectMapper(),registry,true,"127.0.0.1",Integer.parseInt(System.getenv().getOrDefault("TEST_CACHE_PORT","26381")),System.getenv("CACHE_REDIS_PASSWORD"),true,java.time.Duration.ofMillis(100),16777216);
+        var type=new com.fasterxml.jackson.core.type.TypeReference<Map<String,Integer>>(){};var loads=new java.util.concurrent.atomic.AtomicInteger();
+        try {
+            String key=prefix+"local";java.util.function.Supplier<Map<String,Integer>> loader=()->Map.of("n",loads.incrementAndGet());
+            assertEquals(1,localCache.get("catalog",key,java.time.Duration.ofMinutes(1),type,loader).get("n"));
+            var copy=localCache.get("catalog",key,java.time.Duration.ofMinutes(1),type,loader);copy.put("n",999);
+            assertEquals(1,localCache.get("catalog",key,java.time.Duration.ofMinutes(1),type,loader).get("n"));
+            assertTrue(registry.get("parking.cache.local.hit").counter().count()>=2);
+            Thread.sleep(150);localCache.get("catalog",key,java.time.Duration.ofMinutes(1),type,loader);
+            assertEquals(1,loads.get());assertTrue(registry.get("parking.cache.redis.hit").counter().count()>0);
+            localCache.invalidateAfterCommit("catalog");assertEquals(2,localCache.get("catalog",key,java.time.Duration.ofMinutes(1),type,loader).get("n"));
+            double before=registry.get("parking.cache.local.hit").counter().count();
+            localCache.get("dashboard",key,java.time.Duration.ofSeconds(30),type,loader);localCache.get("dashboard",key,java.time.Duration.ofSeconds(30),type,loader);
+            assertEquals(before,registry.get("parking.cache.local.hit").counter().count());
+        }finally{localCache.close();}
+    }
+    @Test void databaseLoaderFailureIsNotRetriedAsACacheFailure() {
+        var calls=new java.util.concurrent.atomic.AtomicInteger();var type=new com.fasterxml.jackson.core.type.TypeReference<Map<String,Integer>>(){};
+        assertThrows(org.springframework.dao.DataIntegrityViolationException.class,()->cache.get("it:"+prefix,"failure",java.time.Duration.ofSeconds(30),type,()->{calls.incrementAndGet();throw new org.springframework.dao.DataIntegrityViolationException("test-only");}));
+        assertEquals(1,calls.get());
+    }
+
+    @Test void failedInvalidationDisablesOldLocalAndRedisEntriesUntilNamespaceRecovery() {
+        var localCache=new ReadCache(new com.fasterxml.jackson.databind.ObjectMapper(),new io.micrometer.core.instrument.simple.SimpleMeterRegistry(),true,"127.0.0.1",Integer.parseInt(System.getenv().getOrDefault("TEST_CACHE_PORT","26381")),System.getenv("CACHE_REDIS_PASSWORD"),true,java.time.Duration.ofSeconds(1),16777216);
+        var type=new com.fasterxml.jackson.core.type.TypeReference<Map<String,Integer>>(){};
+        try {
+            assertEquals(1,localCache.get("catalog",prefix,java.time.Duration.ofMinutes(1),type,()->Map.of("n",1)).get("n"));
+            var factory=(org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory)org.springframework.test.util.ReflectionTestUtils.getField(localCache,"factory");
+            factory.stop();localCache.invalidateAfterCommit("catalog");
+            assertEquals(2,localCache.get("catalog",prefix,java.time.Duration.ofMinutes(1),type,()->Map.of("n",2)).get("n"));
+            factory.start();org.springframework.test.util.ReflectionTestUtils.setField(localCache,"unavailableUntil",0L);
+            assertEquals(2,localCache.get("catalog",prefix,java.time.Duration.ofMinutes(1),type,()->Map.of("n",2)).get("n"));
+            assertEquals(2,localCache.get("catalog",prefix,java.time.Duration.ofMinutes(1),type,()->Map.of("n",3)).get("n"));
+        }finally{localCache.close();}
+    }
+    @Autowired ParkingAdmission admission;
+    @Autowired javax.sql.DataSource dataSource;
+    @Test void queuedParkingWriterWaitsBeforeAcquiringAJdbcConnection() throws Exception {
+        int permits=(Integer)org.springframework.test.util.ReflectionTestUtils.getField(admission,"permits");
+        var entered=new CountDownLatch(permits);var release=new CountDownLatch(1);var secondStarted=new CountDownLatch(1);var pool=Executors.newFixedThreadPool(permits+1);
+        var leaders=new java.util.ArrayList<Future<Boolean>>();
+        try {
+            for(int i=0;i<permits;i++)leaders.add(pool.submit(()->admission.execute(park,()->{entered.countDown();try{release.await(5,TimeUnit.SECONDS);}catch(InterruptedException e){throw new IllegalStateException(e);}return true;})));
+            assertTrue(entered.await(5,TimeUnit.SECONDS));
+            var second=pool.submit(()->{secondStarted.countDown();return admission.execute(park,()->true);});assertTrue(secondStarted.await(5,TimeUnit.SECONDS));
+            Thread.sleep(100);assertFalse(second.isDone());
+            assertTrue(dataSource.unwrap(com.zaxxer.hikari.HikariDataSource.class).getHikariPoolMXBean().getActiveConnections()<=permits+1,"Queued requests must not fill the JDBC pool");
+            release.countDown();for(var leader:leaders)assertTrue(leader.get(5,TimeUnit.SECONDS));assertTrue(second.get(5,TimeUnit.SECONDS));
+        }finally{release.countDown();pool.shutdownNow();}
+    }
+
 }

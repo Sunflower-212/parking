@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { jwtDecode } from 'jwt-decode'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import PageShell from './PageShell.vue'
@@ -24,7 +24,11 @@ const dialog = ref(false),
   submitting = ref(false),
   model = ref({}),
   form = ref(),
-  sources = ref({})
+  sources = ref({}),
+  sourcesLoading = ref(props.page === 'parks'),
+  sourcesError = ref('')
+let sourcesController,
+  disposed = false
 const canEdit = computed(() => !config.rootEdit || role === 1)
 function changePage(value) {
   pagination.pageNum = value
@@ -48,7 +52,13 @@ function open(row) {
   dialog.value = true
 }
 async function save() {
-  if (submitting.value || !(await form.value.validate().catch(() => false))) return
+  if (
+    submitting.value ||
+    sourcesLoading.value ||
+    sourcesError.value ||
+    !(await form.value.validate().catch(() => false))
+  )
+    return
   submitting.value = true
   try {
     await request({
@@ -110,30 +120,57 @@ async function exportCsv() {
     submitting.value = false
   }
 }
-onMounted(async () => {
-  load()
+async function loadSources() {
   if (props.page === 'parks') {
+    sourcesController?.abort()
+    const controller = new AbortController()
+    sourcesController = controller
+    sourcesLoading.value = true
+    sourcesError.value = ''
     try {
       const results = await Promise.all([
-        request.get('/rule/select'),
-        role === 1 ? request.get('/admin/list') : Promise.resolve({ data: [] }),
+        request.get('/rule/select', { signal: controller.signal }),
+        role === 1
+          ? request.get('/admin/list', { signal: controller.signal })
+          : Promise.resolve({ data: [] }),
       ])
+      if (disposed || controller !== sourcesController) return
       sources.value = {
         rules: results[0].data.map((r) => ({ value: r.id, label: r.rule_name })),
         admins: results[1].data.map((a) => ({ value: a.id, label: a.admin_name })),
       }
-    } catch {}
+    } catch (error) {
+      if (!disposed && controller === sourcesController && error.code !== 'ERR_CANCELED')
+        sourcesError.value = '停车场基础选项加载失败，请重试'
+    } finally {
+      if (!disposed && controller === sourcesController) sourcesLoading.value = false
+    }
   }
+}
+onMounted(() => {
+  load()
+  loadSources()
+})
+onBeforeUnmount(() => {
+  disposed = true
+  sourcesController?.abort()
 })
 </script>
 <template>
   <PageShell :title="config.title" :description="config.description"
     ><template #actions
       ><el-button v-if="config.export" :loading="submitting" @click="exportCsv">导出 CSV</el-button
-      ><el-button v-if="config.create" type="primary" @click="open()"
+      ><el-button
+        v-if="config.create"
+        type="primary"
+        :disabled="sourcesLoading || !!sourcesError"
+        @click="open()"
         >新增{{ config.title.replace('管理', '') }}</el-button
       ><el-button @click="load()" :loading="loading">刷新</el-button></template
-    ><SearchBar @search="load(true)" @reset="reset"
+    ><el-alert v-if="sourcesError" :title="sourcesError" type="error" :closable="false"
+      ><el-button link @click="loadSources">重新加载选项</el-button></el-alert
+    >
+    <SearchBar @search="load(true)" @reset="reset"
       ><el-form-item v-for="field in config.filters" :key="field.key" :label="field.label"
         ><el-select
           v-if="field.options"
@@ -192,7 +229,13 @@ onMounted(async () => {
         :min-width="config.reset ? 170 : 130"
         fixed="right"
         ><template #default="{ row }"
-          ><el-button v-if="config.update" link type="primary" @click="open(row)">编辑</el-button
+          ><el-button
+            v-if="config.update"
+            link
+            type="primary"
+            :disabled="sourcesLoading || !!sourcesError"
+            @click="open(row)"
+            >编辑</el-button
           ><el-button
             v-if="config.reset"
             link
@@ -270,7 +313,13 @@ onMounted(async () => {
           /></el-form-item></div></el-form
       ><template #footer
         ><el-button @click="dialog = false" :disabled="submitting">取消</el-button
-        ><el-button type="primary" :loading="submitting" @click="save">保存</el-button></template
+        ><el-button
+          type="primary"
+          :loading="submitting"
+          :disabled="sourcesLoading || !!sourcesError"
+          @click="save"
+          >保存</el-button
+        ></template
       ></el-dialog
     ></PageShell
   >

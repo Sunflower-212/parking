@@ -8,6 +8,7 @@ const [label = 'optimized', base = 'http://127.0.0.1:28088'] = process.argv.slic
 mkdirSync('.work/ui', { recursive: true })
 if (!/^https?:\/\/(localhost|127\.0\.0\.1):\d+$/.test(base)) throw new Error('Only local benchmark URLs are supported')
 const browser = await chromium.launch({ headless: true })
+const browserVersion = browser.version()
 const samples = []
 try {
   for (let round = 0; round < 3; round++) {
@@ -40,5 +41,5 @@ try {
   }
 } finally { await browser.close() }
 mkdirSync('.work', { recursive: true })
-writeFileSync(`.work/web-${label}.json`, JSON.stringify({ label, viewport: '1440x900', throttling: 'none; local Docker desktop', samples }, null, 2))
+writeFileSync(`.work/web-${label}.json`, JSON.stringify({ label, browserVersion, sampledAt: new Date().toISOString(), viewport: '1440x900', throttling: 'none; local Docker desktop', samples }, null, 2))
 console.log(JSON.stringify({ label, samples }))

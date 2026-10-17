@@ -16,9 +16,9 @@ public interface ParkingMapper {
             "park_storey=#{park_storey},rule_id=#{rule_id},update_time=now() where id=#{id}")
     void updateParking(Parking parking);
 
-    List<Parking> findAllParking(String parkName, String parkAddress, String adminName, String ruleName);
+    List<Parking> findAllParking(@Param("parkName") String parkName, @Param("parkAddress") String parkAddress, @Param("adminName") String adminName, @Param("ruleName") String ruleName);
 
-    List<Parking> findParking(String parkName, String parkAddress, String ruleName, Integer adminId);
+    List<Parking> findParking(@Param("parkName") String parkName, @Param("parkAddress") String parkAddress, @Param("ruleName") String ruleName, @Param("adminId") Integer adminId);
 
     @Select("select * from parking where park_name=#{parkName}")
     Parking findParkingByParkingName(String parkName);

@@ -17,6 +17,8 @@ public class ParkingServiceImpl implements ParkingService {
     @Autowired private org.springframework.jdbc.core.JdbcTemplate db;
     private void validate(Parking p) {
         if(p.getPark_name()==null || p.getPark_name().isBlank() || p.getPark_name().length()>20 || p.getPark_address()==null || p.getPark_address().isBlank() || p.getPark_address().length()>40 || p.getPark_storey()==null || p.getPark_storey()<1 || p.getPark_storey()>100 || p.getRule_id()==null || p.getAdmin_id()==null) throw new IllegalArgumentException("停车场名称、地址、楼层、规则或管理员无效");
+        if(!Boolean.TRUE.equals(db.queryForObject("select exists(select 1 from rule where id=?)",Boolean.class,p.getRule_id()))) throw new IllegalArgumentException("计费规则不存在，请刷新后选择");
+        if(!Boolean.TRUE.equals(db.queryForObject("select exists(select 1 from admin where id=?)",Boolean.class,p.getAdmin_id()))) throw new IllegalArgumentException("所属管理员不存在，请刷新后选择");
     }
     @Autowired
     private ParkingMapper parkingMapper;
