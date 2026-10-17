@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.zjmproject.mapper.OrdersMapper">
+    <select id="findOrdersByUserId" resultType="org.zjmproject.pojo.Orders">
+        select
+            o.*,
+            u.user_name,
+            p.park_name
+            from orders o
+        left join
+                user u on o.user_id = u.id
+        left join
+                parking p on o.park_id = p.id
+        <where>
+            user_id=#{userId}
+        </where>
+    </select>
+    <select id="adminGetPageList" resultMap="ordersResultMap">
+        select
+            o.*,
+            u.user_name,
+            p.park_name
+        from orders o
+        left join
+            user u on o.user_id = u.id
+        left join
+            parking p on o.park_id = p.id
+        <where>
+            p.admin_id=#{adminId}
+            <if test="userName!=null">
+                and user_name like concat('%',#{userName},'%')
+            </if>
+            <if test="parkName!=null">
+                and park_name like concat('%',#{parkName},'%')
+            </if>
+            <if test="startDateTime!=null and endDateTime!=null">
+                and  <![CDATA[o.create_time >= #{startDateTime}]]>
+                and  <![CDATA[o.create_time < #{endDateTime}]]>
+            </if>
+        </where>
+    </select>
+    <select id="rootGetPageList" resultType="org.zjmproject.pojo.Orders">
+        select
+            o.*,
+            u.user_name,
+            p.park_name,
+            a.admin_name
+        from orders o
+        left join
+            user u on o.user_id = u.id
+        left join
+            parking p on o.park_id = p.id
+        left join
+            admin a on a.id = p.admin_id
+        <where>
+            <if test="userName!=null">
+                user_name like concat('%',#{userName},'%')
+            </if>
+            <if test="parkName!=null">
+                and park_name like concat('%',#{parkName},'%')
+            </if>
+            <if test="startDateTime!=null and endDateTime!=null">
+                and  <![CDATA[o.create_time >= #{startDateTime}]]>
+                and  <![CDATA[o.create_time < #{endDateTime}]]>
+            </if>
+            <if test="adminName!=null">
+                and a.admin_name like concat('%',#{adminName},'%')
+            </if>
+        </where>
+    </select>
+    <select id="userGetOrdersList" resultType="org.zjmproject.pojo.Orders">
+        select
+            o.*,
+            p.park_name
+        from orders o
+        left join
+            user u on o.user_id = u.id
+        left join
+            parking p on o.park_id = p.id
+        <where>
+            and user_id=#{userId}
+            <if test="parkName!=null">
+                and park_name like concat('%',#{parkName},'%')
+            </if>
+            <if test="startTime!=null">
+                and <![CDATA[o.create_time >= #{startTime}]]>
+            </if>
+            <if test="endTime!=null">
+                and <![CDATA[o.create_time <= #{endTime}]]>
+            </if>
+
+        </where>
+    </select>
+    <resultMap id="ordersResultMap" type="org.zjmproject.pojo.Orders">
+        <result column="id" property="id"/>
+        <result column="plate_num" property="plate_num"/>
+        <result column="user_id" property="user_id"/>
+        <result column="park_id" property="park_id"/>
+        <result column="enter_time" property="enter_time"/>
+        <result column="exit_time" property="exit_time"/>
+        <result column="parking_duration" property="parking_duration"/>
+        <result column="moneys" property="moneys"/>
+        <result column="create_time" property="create_time"/>
+        <result column="user_name" property="user_name"/>
+        <result column="park_name" property="park_name"/>
+    </resultMap>
+</mapper>

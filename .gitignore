@@ -1,0 +1,33 @@
+# Private configuration and credentials
+**/application.yml
+**/application.yaml
+**/application-local.*
+.env
+.env.*
+!.env.example
+**/*api_key*.txt
+**/*api-key*.txt
+!**/*.example.txt
+*.pem
+*.key
+*.p12
+*.pfx
+# Local files and generated output
+**/.idea/
+**/.vscode/
+**/target/
+**/node_modules/
+**/dist/
+**/coverage/
+.cache/
+.work/
+data/
+backups/
+*-backup.sql
+*.dump
+uploads/
+*.log
+*.zip
+*.jar
+*.iml
+.DS_Store

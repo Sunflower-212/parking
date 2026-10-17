@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.zjmproject.mapper.ParkingMapper">
+    <select id="findAllParking" resultMap="parkingResultMap">
+        select
+            p.*,
+            a.admin_name,
+            r.rule_name,
+            r.free_time,
+            r.charging_unit,
+            r.unit_cost
+        from parking p
+        left join
+            admin a on p.admin_id = a.id
+        left join
+            rule r on p.rule_id = r.id
+
+        <where>
+            <if test="parkName!=null">
+                park_name like concat('%',#{parkName},'%')
+            </if>
+            <if test="parkAddress != null and parkAddress != \'\'">
+                and park_address like concat('%',#{parkAddress},'%')
+            </if>
+            <if test="adminName != null and adminName != \'\'">
+                and admin_name like concat('%',#{adminName},'%')
+            </if>
+            <if test="ruleName != null and ruleName != \'\'">
+                and rule_name like concat('%',#{ruleName},'%')
+            </if>
+        </where>
+    </select>
+    <select id="findParking" resultMap="parkingResultMap">
+        select
+            p.*,
+            r.rule_name,
+            r.free_time,
+            r.charging_unit,
+            r.unit_cost,
+            a.admin_name
+        from parking p
+        left join
+            rule r on p.rule_id = r.id
+        left join
+            admin a on p.admin_id = a.id
+        <where>
+            <if test="parkName!=null">
+                park_name like concat('%',#{parkName},'%')
+            </if>
+            <if test="parkAddress != null and parkAddress != \'\'">
+                and park_address like concat('%',#{parkAddress},'%')
+            </if>
+            <if test="ruleName != null and ruleName != \'\'">
+                and rule_name like concat('%',#{ruleName},'%')
+            </if>
+        and admin_id=#{adminId}
+        </where>
+    </select>
+    <select id="findParkByParkName" resultMap="parkingResultMap">
+        select
+            p.*,
+            a.admin_name,
+            r.rule_name,
+            r.free_time,
+            r.charging_unit,
+            r.unit_cost
+        from parking p
+        left join
+            admin a on p.admin_id = a.id
+        left join
+            rule r on p.rule_id = r.id
+        <where>
+            park_name=#{parkName}
+        </where>
+    </select>
+    <select id="findParkById" resultMap="parkingResultMap">
+        select
+        p.*,
+        a.admin_name,
+        r.rule_name,
+        r.free_time,
+        r.charging_unit,
+        r.unit_cost
+        from parking p
+        left join
+        admin a on p.admin_id = a.id
+        left join
+        rule r on p.rule_id = r.id
+        where p.id =#{parkId}
+    </select>
+    <select id="getAdminNameByParkName" resultType="java.lang.String">
+        select
+            a.admin_name
+        from parking p
+        left join
+            admin a on p.admin_id = a.id
+        where p.park_name=#{parkName}
+    </select>
+    <resultMap id="parkingResultMap" type="org.zjmproject.pojo.Parking">
+        <result property="id" column="id"/>
+        <result property="admin_id" column="admin_id"/>
+        <result property="park_name" column="park_name"/>
+        <result property="park_address" column="park_address"/>
+        <result property="park_mount" column="park_mount"/>
+        <result property="park_spare" column="park_spare"/>
+        <result property="park_storey" column="park_storey"/>
+        <result property="rule_id" column="rule_id"/>
+        <result property="create_time" column="create_time"/>
+        <result property="update_time" column="update_time"/>
+        <result property="admin_name" column="admin_name"/>
+        <result property="rule_name" column="rule_name"/>
+        <result property="free_time" column="free_time"/>
+        <result property="charging_unit" column="charging_unit"/>
+        <result property="unit_cost" column="unit_cost"/>
+    </resultMap>
+
+</mapper>

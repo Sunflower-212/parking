@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.zjmproject.mapper.HistoricalSessionMapper">
+    <insert id="insert">
+        INSERT INTO historicalSession (chatId, type, userId, create_time, update_time)
+        VALUES (#{chatId}, #{type}, #{userId},now(),now())
+    </insert>
+
+    <select id="findByTypeAndUserId" resultType="org.zjmproject.pojo.HistoricalSession">
+        SELECT * FROM historicalSession
+        WHERE type = #{type} AND userId = #{userId}
+    </select>
+
+    <delete id="deleteByChatId">
+        DELETE FROM historicalSession
+        WHERE chatId = #{chatId}
+    </delete>
+
+    <select id="findByChatId" resultType="org.zjmproject.pojo.HistoricalSession">
+        SELECT * FROM historicalSession
+        WHERE chatId = #{chatId}
+    </select>
+</mapper>

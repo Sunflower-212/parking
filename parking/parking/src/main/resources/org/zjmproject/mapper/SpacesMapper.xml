@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.zjmproject.mapper.SpacesMapper" >
+    <select id="findSpacesByInfo" resultMap="SpacesResultMap">
+        select
+            s.*,
+            p.park_name
+        from spaces s
+        left join parking p on p.id = s.park_id
+        where park_name = #{parkName}
+          and spaces_row =#{spacesRow}
+          and spaces_col=#{spacesCol}
+          and spaces_storey=#{spacesStorey}
+    </select>
+    <insert id="addSpace">
+        insert into spaces(park_id, spaces_name, spaces_col, spaces_row, spaces_storey, spaces_flag, create_time, update_time)
+        select p.id as park_id,#{spacesName},#{spacesCol},#{spacesRow},#{spacesStorey},#{spacesFlag},now(),now()
+        from parking p
+        where park_name = #{parkName}
+    </insert>
+    <update id="updateSpace">
+        update spaces
+        set
+            <if test="spacesName!=null">
+                spaces_name = #{spacesName},
+            </if>
+            <if test="spacesFlag!=null">
+                spaces_flag = #{spacesFlag},
+            </if>
+            user_name = #{userName},
+            update_time = now()
+        where id = #{spacesId}
+    </update>
+    <update id="userOccupiesSpace">
+        update spaces
+        set update_time =now(),user_name = #{userName}
+        where id = #{spacesId}
+    </update>
+    <select id="getSpacesList" resultMap="SpacesResultMap">
+        select
+            s.*,
+            p.park_name
+        from spaces s
+        left join
+            parking p on s.park_id = p.id
+        where park_id=#{parkId} and spaces_storey=#{spacesStorey}
+    </select>
+    <select id="selectSpaces" resultMap="SpacesResultMap">
+        select
+            s.*,
+            p.park_name
+        from spaces s
+        left join
+            parking p on s.park_id = p.id
+        <where>
+            park_id=#{parkId} and spaces_storey=#{spacesStorey}
+            <if test="spacesName!=null">
+                and spaces_name like concat('%', #{spacesName}, '%')
+            </if>
+        </where>
+    </select>
+    <delete id="deleteSpacesByIds">
+        delete from spaces where id in
+        <foreach collection="ids" item="id" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+    </delete>
+    <select id="findSpacesByParking" resultMap="SpacesResultMap">
+        select
+            s.*,
+            p.park_name
+        from spaces s
+        left join
+            parking p on s.park_id = p.id
+        where 1=1
+        <if test="parkingId!=null">
+            and park_id = #{parkingId}
+        </if>
+        <if test="parkName!=null">
+            and park_name like concat('%', #{parkName}, '%')
+        </if>
+        <if test="parkAddress!=null">
+            and park_address like concat('%', #{parkAddress}, '%')
+        </if>
+    </select>
+    <resultMap id="SpacesResultMap" type="org.zjmproject.pojo.Spaces">
+        <result column="active_enter_id" property="active_enter_id"/>
+        <result property="id" column="id"/>
+        <result property="park_id" column="park_id"/>
+        <result property="spaces_name" column="spaces_name"/>
+        <result property="spaces_col" column="spaces_col"/>
+        <result property="spaces_row" column="spaces_row"/>
+        <result property="spaces_storey" column="spaces_storey"/>
+        <result property="spaces_flag" column="spaces_flag"/>
+        <result property="user_name" column="user_name"/>
+        <result property="create_time" column="create_time"/>
+        <result property="update_time" column="update_time"/>
+        <result property="park_name" column="park_name"/>
+    </resultMap>
+</mapper>

@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.zjmproject.mapper.RechargesMapper">
+    <insert id="add" parameterType="org.zjmproject.pojo.Recharges" useGeneratedKeys="true" keyProperty="id">
+        insert into
+            recharges(user_id,amounts,create_time,pay_method)
+        values (#{user_id},#{amounts},#{create_time},#{pay_method})
+    </insert>
+    <select id="findRechargesByUserId" resultMap="rechargesResultMap">
+        select
+        r.*,
+        u.user_name
+        from recharges r
+        left join
+        user u on r.user_id = u.id
+        <where>
+            r.user_id = #{userId}
+            <if test="amounts!=null">
+                and r.amounts=#{amounts}
+            </if>
+            <if test="startTime!=null">
+                and <![CDATA[r.create_time >= #{startTime}]]>
+            </if>
+            <if test="endTime!=null">
+                and  <![CDATA[r.create_time < #{endTime}]]>
+            </if>
+        </where>
+    </select>
+    <select id="findRechargesByDate" resultMap="rechargesResultMap">
+        select
+            r.*,
+            u.user_name
+        from recharges r
+        left join
+            user u on r.user_id = u.id
+        <where>
+            <if test="amounts!=null">
+                and r.amounts=#{amounts}
+            </if>
+            <if test="startDateTime!=null">
+                and <![CDATA[r.create_time >= #{startDateTime}]]>
+            </if>
+            <if test="endDateTime!=null">
+                and  <![CDATA[r.create_time < #{endDateTime}]]>
+            </if>
+        </where>
+    </select>
+    <resultMap id="rechargesResultMap" type="org.zjmproject.pojo.Recharges">
+        <result property="id" column="id"/>
+        <result property="user_id" column="user_id"/>
+        <result property="amounts" column="amounts"/>
+        <result property="pay_no" column="pay_no"/>
+        <result property="flag" column="flag"/>
+        <result property="create_time" column="create_time"/>
+        <result property="user_name" column="user_name"/>
+    </resultMap>
+</mapper>

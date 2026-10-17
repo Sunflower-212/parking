@@ -1,0 +1,41 @@
+name: Verify
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: vue3/parking-vue/package-lock.json
+      - name: Start isolated infrastructure
+        run: |
+          python3 scripts/init-env.py
+          docker compose -f compose.yml -f compose.dev.yml up -d --wait mysql redis
+      - name: Backend and database migration tests
+        run: |
+          set -a
+          source .env
+          set +a
+          export PARKING_INTEGRATION_TESTS=true TEST_DB_URL='jdbc:mysql://127.0.0.1:3307/parking_springboot?serverTimezone=Asia/Shanghai' TEST_REDIS_PORT=6380
+          cd parking/parking
+          sh mvnw -B verify
+          cd ../..
+          python3 scripts/test-migration.py
+      - name: Frontend tests and build
+        working-directory: vue3/parking-vue
+        run: |
+          npm ci
+          npm test
+          npm run build
+      - name: Stop test services
+        if: always()
+        run: docker compose -f compose.yml -f compose.dev.yml down

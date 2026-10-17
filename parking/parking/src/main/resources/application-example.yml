@@ -1,0 +1,66 @@
+spring:
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: ${DB_URL:jdbc:mysql://localhost:3306/parking_springboot?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai}
+    username: ${DB_USER:parking}
+    password: ${DB_PASSWORD}
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD}
+      timeout: 5s
+  servlet:
+    multipart:
+      max-file-size: 5MB
+      max-request-size: 6MB
+  autoconfigure:
+    exclude: ${AI_AUTOCONFIG_EXCLUDE:org.springframework.ai.autoconfigure.openai.OpenAiAutoConfiguration}
+  ai:
+    openai:
+      base-url: ${DEEPSEEK_BASE_URL:https://api.deepseek.com}
+      api-key: ${DEEPSEEK_API_KEY:}
+      chat:
+        options:
+          model: ${DEEPSEEK_MODEL:deepseek-chat}
+mybatis:
+  mapper-locations: classpath:org/zjmproject/mapper/*.xml
+parking:
+  jwt-secret: ${JWT_SECRET}
+  reservation-timeout: ${RESERVATION_TIMEOUT:30m}
+  upload-dir: ${UPLOAD_DIR:./uploads}
+  bootstrap:
+    username: ${BOOTSTRAP_ADMIN_USERNAME:}
+    password: ${BOOTSTRAP_ADMIN_PASSWORD:}
+  integrations:
+    ai: ${AI_ENABLED:false}
+    ocr: ${OCR_ENABLED:false}
+    alipay: ${ALIPAY_ENABLED:false}
+    oss: ${OSS_ENABLED:false}
+baidu:
+  cloud:
+    app-api: ${BAIDU_APP_ID:}
+    api-key: ${BAIDU_API_KEY:}
+    secret-key: ${BAIDU_SECRET_KEY:}
+alipay:
+  app-id: ${ALIPAY_APP_ID:}
+  app-private-key: ${ALIPAY_PRIVATE_KEY:}
+  alipay-public-key: ${ALIPAY_PUBLIC_KEY:}
+  notify-url: ${ALIPAY_NOTIFY_URL:}
+  return-url: ${ALIPAY_RETURN_URL:}
+aliyun:
+  access-key-id: ${OSS_ACCESS_KEY_ID:}
+  access-key-secret: ${OSS_ACCESS_KEY_SECRET:}
+  bucket-name: ${OSS_BUCKET:}
+  endpoint: ${OSS_ENDPOINT:}
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      show-details: never
+logging:
+  level:
+    org.springframework.ai: WARN
