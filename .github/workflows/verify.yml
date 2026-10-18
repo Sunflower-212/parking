@@ -7,6 +7,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Check repository publication policy
+        run: python3 scripts/check-publication.py
       - uses: actions/setup-java@v4
         with:
           distribution: temurin

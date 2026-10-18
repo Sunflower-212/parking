@@ -16,6 +16,7 @@
 **/*.key
 .cache
 .work
+docs
 data
 backups
 uploads

@@ -135,6 +135,7 @@ def generate():
         '- 真实第三方支付、OCR、AI、OSS 联调未执行；没有真实付款。',
         '- 每版三轮业务负载约 21 分钟，未验证超过默认 30 分钟预约有效期的长稳态吞吐；过期、旧消息和恢复由集成测试覆盖，延迟消息批量到期对持续写入的影响仍需单独长时压测。',
         '- [简历项目亮点](resume-highlights.md)使用本报告同条件实测，区分累计与本轮收益，不把模拟账号写成生产用户，不将闭环 100 VU 写成生产在线人数。','']
+    ROOT.joinpath('docs').mkdir(exist_ok=True)
     ROOT.joinpath('docs/performance-report.md').write_text('\n'.join(lines),encoding='utf-8')
     ROOT.joinpath('docs/performance-summary.json').write_text(json.dumps({'business_date':next(iter(dates)),'versions':summary,'feature_gates':gates,'cold':cold['groups'],'warm':warm['groups'],'browser_profiles':web,'dialog_widths':dialog,'dashboard_page':{key:page_query[key] for key in ('scope','page','select_count')}},ensure_ascii=False,indent=2),encoding='utf-8')
     return data,summary,query,web

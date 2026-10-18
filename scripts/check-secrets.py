@@ -35,6 +35,8 @@ if key_file.exists():
 
 issues = []
 for revision, path in blobs:
+    if path == 'docs' or path.startswith('docs/'):
+        issues.append((path, 'local-only documentation must not be published'))
     if re.search(r'(^|/)(application\.ya?ml|\.env|deepseek-api_key\.txt)$', path) or re.search(r'\.(pem|key|p12|pfx|zip|jar)$', path) or '/.idea/' in '/' + path:
         issues.append((path, 'private or generated file staged'))
     if '/__pycache__/' in '/' + path or path.endswith(('.pyc', '.pyo')):

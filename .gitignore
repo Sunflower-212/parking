@@ -13,6 +13,7 @@
 *.p12
 *.pfx
 # Local files and generated output
+/docs/
 **/.idea/
 **/.vscode/
 **/target/

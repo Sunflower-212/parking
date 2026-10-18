@@ -4,8 +4,6 @@
 
 预约默认保留 **30 分钟**。过期处理采用 **Redisson 持久化延迟队列**，结合数据库事务事件表、原子消息认领与幂等状态更新；不定时扫描预约表。
 
-![登录界面](docs/images/login.png)
-
 ## 功能与技术栈
 
 | 模块 | 内容 |
@@ -40,7 +38,7 @@ docker compose logs --tail=100 backend
 docker compose down
 ```
 
-停止服务保留数据卷。已有数据库请按部署手册先备份、迁移，不能用全新初始化脚本覆盖旧库。
+停止服务保留数据卷。已有数据库请先备份，检查 `database/migrations` 下的增量脚本，不能用全新初始化脚本覆盖旧库。容量版本升级必须停止所有后端写入，再执行 `python scripts/migrate-capacity.py --project parking --buckets 16`，核对后以 `CAPACITY_BUCKETS=16` 启动；回退使用同脚本的 `--rollback`，不能只切换旧镜像。
 
 ## 本地开发
 
@@ -91,17 +89,11 @@ Windows 下完整验证：
 
 后端普通 `mvnw verify` 执行单元测试；真实 MySQL/Redis 集成测试需设置 `PARKING_INTEGRATION_TESTS=true`、`TEST_DB_URL`、`TEST_REDIS_PORT`、`TEST_CACHE_PORT` 及本地数据库/Redis 凭据。CI 已配置完整验证。
 
-## 文档
+## 本地文档与发布规则
 
-- [阅读手册](docs/reading-guide.md)：结构、数据关系、权限和预约队列原理。
-- [操作手册](docs/user-guide.md)：用户、管理员及超级管理员的操作步骤。
-- [Docker 部署手册](docs/docker-deployment.md)：Windows/Linux 部署、配置、迁移和备份恢复。
-- [优化说明](docs/optimization.md)：查询、索引、缓存一致性和性能测试方法。
-- [后台任务与容量优化](docs/background-tasks.md)：容量迁移、RabbitMQ 可选部署、异步导出与故障恢复。
-- [本轮性能报告](docs/performance-report-round3.md)：容量锁优化、100 VU三轮对照、60分钟长测及RabbitMQ成本。
-- [本轮简历项目亮点](docs/resume-highlights-round3.md)：Java 后端量化表述、复现口径和面试说明。
-- [历史性能报告](docs/performance-report.md)与[历史简历材料](docs/resume-highlights.md)：保留先前结果与回退项。
-- [修复与验证记录](docs/verification.md)：修复内容、测试结果及验证边界。
+手册、性能报告及面试材料仅在本地 `docs/` 保存，该目录不再纳入 Git 或 Docker 构建上下文。仓库只发布源码、配置示例、部署和验证脚本；README 保留公共启动说明。
+
+提交前运行 `python scripts/check-publication.py` 和 `python scripts/check-secrets.py`。CI 同样检查禁止跟踪本地文档，避免后续误传。
 
 ## 配置与隐私
 

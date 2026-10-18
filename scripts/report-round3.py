@@ -85,6 +85,7 @@ if __name__=='__main__':
     }
     output={'method':{'clients':100,'warmup_seconds':120,'sample_seconds':300,'rounds':3,'p95_comparison':'median of three round P95s','load':'80% read operation choices,20% reservation choices,successful reservation paired with cancellation','fixture':'100000 users,100 parks,100000 spaces,1000000 entries,1000000 orders,200000 recharges; isolated simulation'},'gates':gates,'matrix':{k:[sanitize(r) for r in v] for k,v in matrix.items()},'additional':{k:[sanitize(r) for r in v] for k,v in extra.items()}}
     docs=ROOT/'docs'
+    docs.mkdir(exist_ok=True)
     text=['# 容量锁优化与后台消息：本轮实测报告','',
           '本报告保留所有回退与失败项。历史三版本报告见[上一轮报告](performance-report.md)，其数字不与本次同场复测混算。精确镜像、轮次和配置见[脱敏汇总](performance-summary-round3.json)。','',
           '## 测试条件','',
