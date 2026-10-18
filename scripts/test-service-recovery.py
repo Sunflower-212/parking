@@ -1,5 +1,5 @@
 """Fault/restart tests confined to parking-verification (never the default application)."""
-import json,subprocess,time,uuid
+import json,os,subprocess,time,uuid
 from pathlib import Path
 from urllib.request import Request,urlopen
 from urllib.error import HTTPError,URLError
@@ -8,9 +8,11 @@ from urllib.parse import urlencode
 ROOT=Path(__file__).resolve().parents[1]
 credentials=dict(line.split('=',1) for line in (ROOT/'.env').read_text(encoding='utf-8').splitlines() if '=' in line and not line.startswith('#'))
 COMPOSE=['docker','compose','-p','parking-verification','-f','compose.yml','-f','compose.test.yml']
+background=os.environ.get('PARKING_BACKGROUND_RECOVERY')=='true'
+if background:COMPOSE+=['-f','compose.background.yml','-f','compose.background.test.yml','--profile','background']
 def service(*args):subprocess.run([*COMPOSE,*args],cwd=ROOT,check=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
-def request(path,token=None,method='GET',body=None):
-    headers={'Content-Type':'application/json'}
+def request(path,token=None,method='GET',body=None,extra_headers=None):
+    headers={'Content-Type':'application/json',**(extra_headers or {})}
     if token:headers['Authorization']=token
     req=Request('http://127.0.0.1:28080'+path,data=None if body is None else json.dumps(body).encode(),method=method,headers=headers)
     try:
@@ -48,7 +50,25 @@ try:
     service('restart','backend','frontend');wait_ready(token);wait_ready()
     assert request('/user/pageList?'+urlencode({'pageNum':1,'pageSize':20,'user_name':name}),token)[1]['data']['total']==1
     print('PASS: MySQL and application restarts preserve fixture data and login state',flush=True)
+    if background:
+        service('stop','rabbitmq')
+        service('restart','backend');wait_ready();wait_ready(token)
+        assert request('/admin/background/capabilities',token)[1]['data']['exports'] is True
+        status,job=request('/admin/background/exports',token,'POST',{'user_name':name},{'Idempotency-Key':str(uuid.uuid4())})
+        assert status==200 and job['code']==0
+        task_id=job['data']['id']
+        service('restart','backend');wait_ready();wait_ready(token)
+        assert request('/user/pageList?'+urlencode({'pageNum':1,'pageSize':20,'user_name':name}),token)[1]['data']['total']==1
+        print('PASS: backend starts and accepts durable tasks while RabbitMQ is offline; core reads and the same token remain usable',flush=True)
+        service('start','rabbitmq')
+        deadline=time.monotonic()+90
+        while time.monotonic()<deadline:
+            status,state=request('/admin/background/exports/'+task_id,token)
+            if status==200 and state.get('code')==0 and state['data']['status']=='DONE':break
+            time.sleep(1)
+        else:raise AssertionError('Durable task did not complete after broker recovery')
+        print('PASS: pending export survives application restart and completes after RabbitMQ recovery',flush=True)
 finally:
-    service('start','redis','redis-cache','mysql','backend','frontend')
+    service('start','redis','redis-cache','mysql','backend','frontend',*(['rabbitmq'] if background else []))
     wait_ready(token)
     request('/user/delete?'+urlencode({'user_name':name}),token,'DELETE')

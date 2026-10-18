@@ -58,7 +58,41 @@ INSERT INTO enter(plate_num,user_id,park_id,enter_time,flag,reservation) VALUES(
             assert sql(f"SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema='{database}' AND table_name='orders' AND index_name='migration_equivalent_user_time';").stdout.strip() == '3'
             print('PASS: legacy data preserved, association and outbox backfilled, rerun succeeds')
             print('PASS: equivalent index with a different name is reused')
+            for name in ('004-capacity.sql','005-background-tasks.sql','006-capacity-buckets.sql'):
+                source=(root/'database/migrations'/name).read_text(encoding='utf-8')
+                sql(f'USE {database};\n'+source);sql(f'USE {database};\n'+source)
+            buckets=(root/'database/migrations/006-capacity-buckets.sql').read_text(encoding='utf-8')
+            for count in (16,16,1):
+                sql(f'USE {database}; SET @capacity_buckets={count};\n'+buckets)
+                assert sql(f'USE {database}; SELECT COUNT(*) FROM parking_capacity;').stdout.strip()==str(count)
+                assert sql(f'USE {database}; SELECT CONCAT(park_mount,\':\',park_spare) FROM parking_capacity_total;').stdout.strip()=='1:0'
+            sql(f'USE {database};\n'+(root/'database/rollback/004-capacity.sql').read_text(encoding='utf-8'))
+            assert sql(f'USE {database}; SELECT buckets FROM capacity_settings;').stdout.strip()=='0'
+            sql(f'USE {database}; UPDATE enter SET reservation=2 WHERE id=1; UPDATE spaces SET spaces_flag=0,active_enter_id=NULL WHERE id=1; UPDATE parking SET park_spare=1 WHERE id=1;')
+            sql(f'USE {database};\n'+(root/'database/migrations/004-capacity.sql').read_text(encoding='utf-8'))
+            sql(f'USE {database};\n'+buckets)
+            assert sql(f'USE {database}; SELECT park_spare FROM parking_capacity_total;').stdout.strip()=='1'
+            sql(f'USE {database}; UPDATE parking_capacity SET park_spare=0;')
+            assert sql(f'USE {database};\n'+buckets,check=False).returncode!=0,'Mismatched capacity must stop migration'
+            assert sql(f'USE {database}; SELECT COUNT(*) FROM enter;').stdout.strip()=='1'
+            print('PASS: capacity migration reruns, bucket switches preserve totals, mismatch blocks migration')
+            print('PASS: rollback fences new writers; subsequent legacy writes can be safely re-upgraded')
     finally:
         # Generated name always stays within this script's disposable namespace.
         assert database.startswith('parking_migration_') and len(database) == 30
         sql(f'DROP DATABASE IF EXISTS `{database}`;')
+
+database = 'parking_migration_' + uuid.uuid4().hex[:12]
+try:
+    for source in sorted((root / 'database/init').glob('*.sql')):
+        sql(f'CREATE DATABASE IF NOT EXISTS `{database}`; USE `{database}`;\n' + source.read_text(encoding='utf-8').replace('parking_springboot',database))
+    assert sql(f'USE {database}; SELECT buckets FROM capacity_settings WHERE id=1;').stdout.strip() == '16'
+    assert sql(f"SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='{database}' AND table_name IN ('parking_capacity','parking_capacity_total','background_event','admin_audit');").stdout.strip() == '4'
+    # A freshly initialized database can immediately follow the supported upgrade path.
+    for name in ('004-capacity.sql','005-background-tasks.sql','006-capacity-buckets.sql'):
+        sql(f'USE {database};\n'+(root/'database/migrations'/name).read_text(encoding='utf-8'))
+    assert sql(f'USE {database}; SELECT buckets FROM capacity_settings WHERE id=1;').stdout.strip() == '16'
+    print('PASS: complete fresh initialization uses 16 buckets and accepts the incremental upgrade path')
+finally:
+    assert database.startswith('parking_migration_') and len(database) == 30
+    sql(f'DROP DATABASE IF EXISTS `{database}`;')

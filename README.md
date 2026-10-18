@@ -14,6 +14,7 @@
 | 停车场管理员 | 所属停车场、车位地图、出入场、停车订单及运营统计 |
 | 超级管理员 | 平台用户、充值流水、管理员账号、所有停车场及共享规则维护 |
 | 后端 | Java 17、Spring Boot 3.4.2、MyBatis、PageHelper 2、Redisson 3.43 |
+| 可选后台任务 | RabbitMQ 4.1.4、事务 Outbox、确认投递、手动 ACK、死信重放、异步用户导出与管理审计 |
 | 前端 | Vue 3、Vite、Pinia、Element Plus、ECharts |
 | 基础设施 | MySQL 8.4.4、Redis 7.4.2、Caffeine 3.1.8、Nginx、Docker Compose |
 | 可选集成 | DeepSeek、百度车牌识别、支付宝沙箱、阿里云 OSS |
@@ -82,6 +83,8 @@ Windows 下完整验证：
 
 ```powershell
 .\scripts\test.ps1 -IncludeBrowser
+# 同时验证 RabbitMQ、容器重启和16桶容量模式
+.\scripts\test.ps1 -IncludeBrowser -IncludeBackground -IncludeRecovery -CapacityBuckets 16
 ```
 
 该脚本启动独立容器基础设施，运行后端测试、迁移测试以及前端测试和构建。运行前设置当前终端的 `JAVA_HOME` 为 JDK 17。
@@ -94,8 +97,10 @@ Windows 下完整验证：
 - [操作手册](docs/user-guide.md)：用户、管理员及超级管理员的操作步骤。
 - [Docker 部署手册](docs/docker-deployment.md)：Windows/Linux 部署、配置、迁移和备份恢复。
 - [优化说明](docs/optimization.md)：查询、索引、缓存一致性和性能测试方法。
-- [性能报告](docs/performance-report.md)：百万数据、100 并发及浏览器实测。
-- [简历项目亮点](docs/resume-highlights.md)：可复现的 Java 后端量化表述、指标口径和面试说明。
+- [后台任务与容量优化](docs/background-tasks.md)：容量迁移、RabbitMQ 可选部署、异步导出与故障恢复。
+- [本轮性能报告](docs/performance-report-round3.md)：容量锁优化、100 VU三轮对照、60分钟长测及RabbitMQ成本。
+- [本轮简历项目亮点](docs/resume-highlights-round3.md)：Java 后端量化表述、复现口径和面试说明。
+- [历史性能报告](docs/performance-report.md)与[历史简历材料](docs/resume-highlights.md)：保留先前结果与回退项。
 - [修复与验证记录](docs/verification.md)：修复内容、测试结果及验证边界。
 
 ## 配置与隐私

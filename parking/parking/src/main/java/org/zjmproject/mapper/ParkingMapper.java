@@ -10,6 +10,7 @@ public interface ParkingMapper {
 
     @Insert("insert into parking(admin_id,park_name,park_address,park_mount,park_spare,park_storey,rule_id,create_time,update_time)" +
             " values (#{admin_id},#{park_name},#{park_address},#{park_mount},#{park_spare},#{park_storey},#{rule_id},now(),now())")
+    @Options(useGeneratedKeys=true,keyProperty="id")
     void addParking(Parking parking);
 
     @Update("update parking set admin_id=#{admin_id},park_name=#{park_name},park_address=#{park_address}," +
@@ -20,7 +21,7 @@ public interface ParkingMapper {
 
     List<Parking> findParking(@Param("parkName") String parkName, @Param("parkAddress") String parkAddress, @Param("ruleName") String ruleName, @Param("adminId") Integer adminId);
 
-    @Select("select * from parking where park_name=#{parkName}")
+    @Select("select p.id,p.admin_id,p.park_name,p.park_address,c.park_mount,c.park_spare,p.park_storey,p.rule_id,p.create_time,p.update_time from parking p join parking_capacity_total c on c.park_id=p.id where p.park_name=#{parkName}")
     Parking findParkingByParkingName(String parkName);
 
     @Delete("delete from parking where park_name=#{parkName}")
@@ -31,24 +32,20 @@ public interface ParkingMapper {
 
     Parking findParkByParkName(String parkName);
 
-    @Update("update parking set park_spare=park_spare+1 where id=#{parkId}")
-    void addParkSpare(Integer parkId);
 
-    @Update("update parking set park_spare=park_spare-1 where id=#{parkId}")
-    void reduceParkSpare(Integer parkId);
 
     String getAdminNameByParkName(String parkName);
 
-    @Select("select * from parking")
+    @Select("select p.id,p.admin_id,p.park_name,p.park_address,c.park_mount,c.park_spare,p.park_storey,p.rule_id,p.create_time,p.update_time from parking p join parking_capacity_total c on c.park_id=p.id")
     List<Parking> parkingList();
 
-    @Select("select * from parking where admin_id=#{adminId}")
+    @Select("select p.id,p.admin_id,p.park_name,p.park_address,c.park_mount,c.park_spare,p.park_storey,p.rule_id,p.create_time,p.update_time from parking p join parking_capacity_total c on c.park_id=p.id where p.admin_id=#{adminId}")
     List<Parking> adminGetParkingList(Integer adminId);
 
-    @Select("select * from parking where rule_id = #{ruleId}")
+    @Select("select p.id,p.admin_id,p.park_name,p.park_address,c.park_mount,c.park_spare,p.park_storey,p.rule_id,p.create_time,p.update_time from parking p join parking_capacity_total c on c.park_id=p.id where p.rule_id=#{ruleId}")
     List<Parking> findParkByRuleId(Integer ruleId);
 
-    @Select("select * from parking where id=#{id}")
+    @Select("select p.id,p.admin_id,p.park_name,p.park_address,c.park_mount,c.park_spare,p.park_storey,p.rule_id,p.create_time,p.update_time from parking p join parking_capacity_total c on c.park_id=p.id where p.id=#{id}")
     Parking findParkingById(Integer id);
 
     Parking findParkById(Integer parkId);

@@ -23,9 +23,7 @@ public interface ParkingService {
 
     Parking findParkByParkName(String parkName);
 
-    void addParkSpare(Integer parkId);
 
-    void reduceParkSpare(Integer parkId);
 
     String getAdminNameByParkName(String parkName);
 

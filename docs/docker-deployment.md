@@ -125,7 +125,8 @@ $env:PATH = "$env:JAVA_HOME\bin;$env:PATH"
 3. 在数据库副本验证迁移，再对目标数据库执行 `database/migrations/002-reservation-queue.sql`。
 4. 查询 `migration_report`。存在无法唯一匹配的有效记录时，迁移会中止；必须人工核查，不得直接删除占用或随意指定车位。
 5. 已完成预约队列迁移的版本继续执行 `database/migrations/003-performance-indexes.sql`；索引迁移可重复执行，不修改业务记录。
-6. 运行 `python scripts/init-env.py` 补充缓存密码，然后启动新版本；检查健康、队列恢复日志和余位。
+6. 升级容量拆分版本时，保持全部写入实例停止，执行 `python scripts/migrate-capacity.py --project parking --buckets 16`；脚本先在私有 `.work/backups` 保存压缩数据库备份，再执行004/005/006。当前默认16桶，需在 `.env` 设置相同的 `CAPACITY_BUCKETS=16`；切换为一桶对照时，迁移参数和配置都改为1。是否发布以完整性能门槛的验收结果为准。脚本检测到后端容器仍运行会拒绝迁移；也需要自行停止容器外的本地后端实例。
+7. 运行 `python scripts/init-env.py` 补充缺少的中间件密码，然后启动新版本；检查健康、队列恢复日志和余位。可选 RabbitMQ 的启用、任务重放和文件卷说明见[后台任务与容量优化](background-tasks.md)。
 
 不要对已有库运行 `database/init/001-schema.sql`。初始化目录只用于空数据卷首次启动。迁移脚本中的 `30 MINUTE` 是旧预约的原业务时限，不随新预约时限配置改变。
 
@@ -182,7 +183,7 @@ docker compose up -d
 
 ## 本轮优化升级和回退
 
-由上一版队列服务升级时，只需备份、执行 `003-performance-indexes.sql`，补充缓存密码并重新构建启动。新环境初始化已包含这些索引，无需再跑增量迁移。
+历史上从预约队列版升级到索引优化版只需003；升级到当前容量拆分版还必须执行004/005/006，不能混跑旧后端与新后端。新环境初始化已包含对应结构；已有卷不会自动重新执行初始化目录。
 
 Windows PowerShell 7：
 
@@ -191,6 +192,8 @@ python scripts/init-env.py
 docker compose stop backend frontend
 Get-Content -Raw -Encoding UTF8 database/migrations/003-performance-indexes.sql |
   docker compose exec -T mysql sh -c 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec mysql -uroot --default-character-set=utf8mb4 parking_springboot'
+python scripts/migrate-capacity.py --project parking --buckets 16
+# 确认本地 .env 中 CAPACITY_BUCKETS=16、PARKING_ADMISSION_PERMITS=8，再启动。
 docker compose up -d --build --wait
 ```
 
@@ -200,16 +203,20 @@ Linux：
 python3 scripts/init-env.py
 docker compose stop backend frontend
 docker compose exec -T mysql sh -c 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec mysql -uroot --default-character-set=utf8mb4 parking_springboot' < database/migrations/003-performance-indexes.sql
+python3 scripts/migrate-capacity.py --project parking --buckets 16
+# 确认本地 .env 中 CAPACITY_BUCKETS=16、PARKING_ADMISSION_PERMITS=8，再启动。
 docker compose up -d --build --wait
 ```
 
-升级前可使用 `docker image tag parking-backend parking-backend:before-upgrade` 和对应前端命令保留镜像。回退时将保留的镜像重新标记为当前服务镜像，运行 `docker compose up -d --no-build`。索引本身兼容上一版，无须删索引或恢复旧数据；若还涉及更早的结构迁移，使用升级前备份恢复并核对记录。
+升级前可使用 `docker image tag parking-backend parking-backend:before-upgrade` 和对应前端命令保留镜像。容量迁移脚本只在 Compose 后端停止时运行，先将数据库备份到本机 `.work/backups`，再执行004/005/006；所有额外启动的本地 JVM 或其他写入实例也必须停止。迁移失败时保持停止并核对差异，不能直接启动新后端。容量版回退必须先执行下文的容量回填，再将保留镜像重新标记为当前服务镜像，运行 `docker compose up -d --no-build`；不能仅切换镜像。索引本身兼容旧版本，无须删索引。
 
 缓存 Redis 可独立停止或重启，后端会回源并记录告警；Token/队列 Redis 故障时登录校验返回 503，前端不会因此清除会话。不要将状态 Redis 改为 LFU/LRU 淘汰，否则可能淘汰 Token 或队列。
 
-从 `21d3012` 升级本轮停车场修复时，没有新增数据库迁移：先备份、保留旧镜像，再重建前后端即可。候选覆盖索引因更新成本增加约 15.4% 已被排除，无须手工创建。Compose 默认开启 1 秒 Caffeine 元数据缓存；可通过 `CACHE_LOCAL_ENABLED=false` 关闭。多实例部署应关闭本地层或先实现跨实例失效，不能依赖本地清理通知其他实例。
+从 `21d3012` 升级到历史停车场修复版 `1867459` 没有新增数据库迁移；当前容量拆分版本需要按前述步骤执行004/005/006。历史候选覆盖索引因更新成本增加约15.4%已被排除，无须手工创建。Compose 开启1秒 Caffeine 元数据缓存，可通过 `CACHE_LOCAL_ENABLED=false` 关闭。多实例部署应关闭本地层或先实现跨实例失效，不能依赖本地清理通知其他实例。
 
-`PARKING_ADMISSION_PERMITS` 默认 4，实际许可不超过 Hikari 最大连接数的四分之一。它限制单个哈希分组进入车辆状态事务的并发数；等待超过 5 秒或队列达到上限时返回 503。排障时同时查看 `parking.admission.wait`、`hikaricp.connections.acquire` 和 `parking.flow.park.lock.hold`，不要只扩大连接池掩盖热点停车场的串行写入。
+回退容量拆分版本前，停止所有后端写入，执行 `python scripts/migrate-capacity.py --project parking --rollback`。脚本先备份、核对实际车位与新计数，再将汇总容量写回旧字段；差异会中止回退。核对后才启动旧镜像。保留新表与消息卷，避免遗失尚未完成的后台任务。
+
+`PARKING_ADMISSION_PERMITS` 当前默认8，采用单进程全局公平信号量，配置必须至少为Hikari保留4个连接（默认连接池20）。事务开启前等待许可，避免固定哈希分组误阻塞其他停车场；等待超过5秒或等待队列超过128时返回503。0仅用于隔离对照实验，正式部署保留准入。排障时同时查看 `parking.admission.wait`、`hikaricp.connections.acquire`、`parking.flow.capacity.update`、`parking.flow.commit.window` 和 `parking.flow.transaction.duration`；应用观察窗口不等同于MySQL精确持锁时间。
 
 `compose.dev.yml` 的回环端口为 MySQL 3307、状态 Redis 6380、缓存 Redis 6381、后端 8080。`compose.test.yml` 使用 23307/26380/26381/28080/28088，配合项目名 `parking-verification` 隔离数据卷；性能测试使用 `parking-benchmark` 项目及 13307/16380/16381/18080/18088。
 

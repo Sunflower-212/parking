@@ -12,32 +12,58 @@ import java.util.function.Supplier;
 /** Wait before borrowing a JDBC connection; database locks still enforce all invariants. */
 @Component
 public class ParkingAdmission {
-    private final Semaphore[] stripes=new Semaphore[64];
+    private final Semaphore gate;
+    private final java.util.concurrent.atomic.AtomicInteger waiting=new java.util.concurrent.atomic.AtomicInteger();
     private final int permits;
     private final TransactionTemplate transaction;
     private final MeterRegistry metrics;
     public ParkingAdmission(PlatformTransactionManager manager,MeterRegistry metrics,
-            @org.springframework.beans.factory.annotation.Value("${parking.admission.permits:4}") int configuredPermits,
+            @org.springframework.beans.factory.annotation.Value("${parking.admission.permits:8}") int configuredPermits,
             @org.springframework.beans.factory.annotation.Value("${spring.datasource.hikari.maximum-pool-size:20}") int poolSize) {
         this.transaction=new TransactionTemplate(manager);this.metrics=metrics;
-        if(configuredPermits<1 || configuredPermits>8)throw new IllegalArgumentException("Admission permits must be between 1 and 8");
-        permits=Math.min(configuredPermits,Math.max(1,poolSize/4));
-        for(int i=0;i<stripes.length;i++)stripes[i]=new Semaphore(permits,true);
+        // Row locks and unique constraints protect writes. Fresh reads after the user lock
+        // must observe cancellation that completed while an expiry worker was waiting.
+        this.transaction.setIsolationLevel(org.springframework.transaction.TransactionDefinition.ISOLATION_READ_COMMITTED);
+        if(configuredPermits<0 || configuredPermits>Math.max(1,poolSize-4))throw new IllegalArgumentException("Admission permits must leave at least four JDBC connections available; zero disables the gate for experiments");
+        permits=configuredPermits;
+        gate=new Semaphore(permits,true);
     }
     public static class Busy extends IllegalStateException {public Busy(){super("停车场请求较多，请稍后重试");}}
     public <T> T execute(Integer parkingId,Supplier<T> action) {
-        // Never acquire an application gate while an outer transaction could already hold rows.
-        if(TransactionSynchronizationManager.isActualTransactionActive())return action.get();
-        if(parkingId==null)return transaction.execute(status->action.get());
-        Semaphore gate=stripes[Math.floorMod(parkingId,stripes.length)];
-        if(gate.getQueueLength()>=128)throw new Busy();
+        if(TransactionSynchronizationManager.isActualTransactionActive())throw new IllegalStateException("Vehicle operations must start outside an existing transaction");
+        if(permits==0)return run(action);
+        if(waiting.incrementAndGet()>128){waiting.decrementAndGet();metrics.counter("parking.admission.rejected","reason","capacity").increment();throw new Busy();}
         boolean locked=false;long start=System.nanoTime();
         try {
             locked=gate.tryAcquire(5,TimeUnit.SECONDS);
-            if(!locked)throw new Busy();
+            if(!locked){metrics.counter("parking.admission.rejected","reason","timeout").increment();throw new Busy();}
             metrics.timer("parking.admission.wait").record(System.nanoTime()-start,TimeUnit.NANOSECONDS);
-            return transaction.execute(status->action.get());
+            waiting.decrementAndGet();
+            return run(action);
         }catch(InterruptedException e){Thread.currentThread().interrupt();throw new Busy();}
-        finally{if(locked)gate.release();}
+        finally{if(locked)gate.release();else waiting.decrementAndGet();}
+    }
+    private <T> T run(Supplier<T> action) {
+        long start=System.nanoTime();
+        try{for(int attempt=0;;attempt++){try{return transaction.execute(status->{
+            TransactionSynchronizationManager.registerSynchronization(new org.springframework.transaction.support.TransactionSynchronization(){
+                private long before;
+                @Override public void beforeCommit(boolean readOnly){before=System.nanoTime();}
+                @Override public void afterCommit(){if(before!=0)metrics.timer("parking.flow.commit.window").record(System.nanoTime()-before,TimeUnit.NANOSECONDS);}
+            });
+            return action.get();
+        });}catch(org.springframework.dao.DataAccessException failure){
+            // Retry only MySQL's definite deadlock rollback, never ambiguous connection/commit failures.
+            if(attempt>=2 || !deadlock(failure))throw failure;
+            metrics.counter("parking.flow.transaction.retry","reason","deadlock").increment();
+            try{TimeUnit.MILLISECONDS.sleep((1L<<attempt)*10+java.util.concurrent.ThreadLocalRandom.current().nextInt(10));}
+            catch(InterruptedException stop){Thread.currentThread().interrupt();throw new Busy();}
+        }}}
+        finally{metrics.timer("parking.flow.transaction.duration").record(System.nanoTime()-start,TimeUnit.NANOSECONDS);}
+    }
+    private boolean deadlock(Throwable error) {
+        for(int depth=0;error!=null && depth<32;depth++,error=error.getCause())
+            if(error instanceof java.sql.SQLException sql && sql.getErrorCode()==1213)return true;
+        return false;
     }
 }

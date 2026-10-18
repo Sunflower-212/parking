@@ -30,6 +30,7 @@ class ParkingIntegrationTest {
     @Autowired JdbcTemplate db;
     @Autowired ParkingFlowService flow;
     @Autowired ReservationQueue queue;
+    @Autowired org.redisson.api.RedissonClient stateRedis;
     @Autowired PaymentService payments;
     @Autowired OrdersService orders;
     @Autowired TestRestTemplate http;
@@ -52,6 +53,7 @@ class ParkingIntegrationTest {
         park2=insert("insert into parking(admin_id,park_name,park_address,park_mount,park_spare,park_storey,rule_id,create_time,update_time) values(?,?,?,0,0,1,?,now(),now())",admin,prefix+"b","test",rule);
         space=insert("insert into spaces(park_id,spaces_name,spaces_col,spaces_row,spaces_storey,spaces_flag,create_time,update_time) values(?,'A1',1,1,1,0,now(),now())",park);
         space2=insert("insert into spaces(park_id,spaces_name,spaces_col,spaces_row,spaces_storey,spaces_flag,create_time,update_time) values(?,'A2',2,1,1,0,now(),now())",park);
+        flow.refreshCapacity(park);flow.refreshCapacity(park2);
     }
     @AfterEach void cleanup() {
         db.update("delete from recharges where user_id in (?,?)",user,user2);
@@ -63,7 +65,7 @@ class ParkingIntegrationTest {
         db.update("delete from rule where id=?",rule);
         db.update("delete from user where id in (?,?)",user,user2);
     }
-    int available() {return db.queryForObject("select park_spare from parking where id=?",Integer.class,park);}
+    int available() {return db.queryForObject("select park_spare from parking_capacity_total where park_id=?",Integer.class,park);}
     @Test void reservationEntryAndExitMaintainCapacityAndChargeExactlyOnce() {
         var reservation=flow.reserve(user,space);assertEquals(1,available());
         flow.enter(plate,park);assertEquals(1,available());
@@ -80,6 +82,47 @@ class ParkingIntegrationTest {
         int newer=flow.reserve(user,space2).getId();flow.expire(old);
         assertEquals(newer,db.queryForObject("select active_enter_id from spaces where id=?",Integer.class,space2));
         assertEquals(1,available());
+    }
+    @Test void completedExpiryDoesNotRequireADeletedHistoricalSpace() {
+        int id=flow.reserve(user,space).getId();flow.cancel(user,id);
+        db.update("delete from spaces where id=?",space);flow.refreshCapacity(park);
+        flow.expire(id);flow.cancel(user,id);assertEquals(1,available());
+    }
+    @Test void completedDelayCopiesAreAcknowledgedWithoutWaitingForTheUserLockOrRewritingCompletion() throws Exception {
+        int id=flow.reserve(user,space).getId();flow.cancel(user,id);
+        LocalDateTime completed=LocalDateTime.now(clock).minusMinutes(1).withNano(0);
+        db.update("update reservation_event set completed_at=? where reservation_id=?",completed,id);
+        var held=new CountDownLatch(1);var release=new CountDownLatch(1);var pool=Executors.newSingleThreadExecutor();
+        try {
+            var blocker=pool.submit(()->new org.springframework.transaction.support.TransactionTemplate(transactions).execute(t->{
+                db.queryForObject("select id from user where id=? for update",Integer.class,user);held.countDown();
+                try{release.await(10,TimeUnit.SECONDS);}catch(InterruptedException e){throw new IllegalStateException(e);}return true;
+            }));
+            assertTrue(held.await(3,TimeUnit.SECONDS));
+            var ready=stateRedis.<String>getDeque("parking:{reservation}:ready");var processing=stateRedis.<String>getDeque("parking:{reservation}:processing");
+            ready.add(Integer.toString(id));long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(3);
+            while(System.nanoTime()<deadline && (ready.contains(Integer.toString(id)) || processing.contains(Integer.toString(id))))Thread.sleep(30);
+            assertFalse(ready.contains(Integer.toString(id)));assertFalse(processing.contains(Integer.toString(id)));
+            assertEquals(completed,db.queryForObject("select completed_at from reservation_event where reservation_id=?",LocalDateTime.class,id));
+            release.countDown();blocker.get(3,TimeUnit.SECONDS);assertEquals(2,available());
+        }finally{release.countDown();pool.shutdownNow();}
+    }
+    @Test void aMissingEventLedgerDoesNotSilentlyDiscardARealExpiry() throws Exception {
+        int id=flow.reserve(user,space).getId();
+        db.update("delete from reservation_event where reservation_id=?",id);
+        db.update("update enter set expires_at=date_sub(now(3),interval 1 second) where id=?",id);
+        stateRedis.<String>getDeque("parking:{reservation}:ready").add(Integer.toString(id));
+        long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(5);
+        while(System.nanoTime()<deadline && available()!=2)Thread.sleep(50);
+        assertEquals(2,available());assertEquals(2,db.queryForObject("select reservation from enter where id=?",Integer.class,id));
+    }
+    @Test void expiredReservationEnteringStillAllocatesTheLowestAvailableSpace() {
+        int id=flow.reserve(user,space2).getId();
+        db.update("update enter set expires_at=date_sub(now(3),interval 1 second) where id=?",id);
+        flow.enter(plate,park);
+        assertEquals(space,db.queryForObject("select space_id from enter where active_user_id=?",Integer.class,user));
+        assertEquals(1,available());
+        assertEquals(0,db.queryForObject("select spaces_flag from spaces where id=?",Integer.class,space2));
     }
     @Test void duplicateAndForeignCancellationAreRejected() {
         var r=flow.reserve(user,space);
@@ -396,6 +439,80 @@ class ParkingIntegrationTest {
         }finally{localCache.close();}
     }
     @Autowired ParkingAdmission admission;
+    @Autowired ParkingCapacity capacity;
+    @Autowired org.zjmproject.service.ParkingService metadataService;
+    @Test void reducingFloorsUsesTheCurrentMapAfterAnOlderSnapshotWasEstablished() throws Exception {
+        db.update("update parking set park_storey=3 where id=?",park);
+        int admin=db.queryForObject("select admin_id from parking where id=?",Integer.class,park);
+        var read=new CountDownLatch(1);var changed=new CountDownLatch(1);var pool=Executors.newSingleThreadExecutor();
+        try {
+            var edit=pool.submit(()->{
+                var tx=new org.springframework.transaction.support.TransactionTemplate(transactions);
+                tx.setIsolationLevel(org.springframework.transaction.TransactionDefinition.ISOLATION_REPEATABLE_READ);
+                return tx.execute(t->{
+                    org.zjmproject.utils.ThreadLocalUtil.set(Map.of("id",admin,"permissions",1));
+                    try {
+                        db.queryForObject("select count(*) from spaces where park_id=?",Integer.class,park);read.countDown();
+                        try{if(!changed.await(5,TimeUnit.SECONDS))throw new IllegalStateException("Map writer did not finish");}catch(InterruptedException e){throw new IllegalStateException(e);}
+                        var update=new org.zjmproject.pojo.Parking();update.setId(park);update.setAdmin_id(admin);update.setPark_name(prefix);update.setPark_address("test");update.setPark_storey(1);update.setRule_id(rule);
+                        assertThrows(IllegalArgumentException.class,()->metadataService.updateParking(update));t.setRollbackOnly();return true;
+                    } finally {org.zjmproject.utils.ThreadLocalUtil.remove();}
+                });
+            });
+            assertTrue(read.await(3,TimeUnit.SECONDS));
+            new org.springframework.transaction.support.TransactionTemplate(transactions).executeWithoutResult(t->{
+                db.queryForObject("select id from parking where id=? for update",Integer.class,park);
+                db.update("insert into spaces(park_id,spaces_name,spaces_col,spaces_row,spaces_storey,spaces_flag,create_time,update_time) values(?,'B1',1,1,2,0,now(),now())",park);flow.refreshCapacity(park);
+            });changed.countDown();assertTrue(edit.get(5,TimeUnit.SECONDS));assertEquals(3,db.queryForObject("select park_storey from parking where id=?",Integer.class,park));
+        }finally{changed.countDown();pool.shutdownNow();}
+    }
+    @Test void capacityHashMatchesMysqlAndDistributesRoundRobinSpaceIds() {
+        var distributed=new HashSet<Integer>();
+        int configured=db.queryForObject("select buckets from capacity_settings where id=1",Integer.class);
+        for(int n=0;n<32;n++) {
+            int id=1+n*16;
+            assertEquals(db.queryForObject("select mod(crc32(cast(? as char)),?)",Integer.class,id,configured),capacity.bucket(id));
+            distributed.add(capacity.bucket(id));
+        }
+        if(configured==16)assertTrue(distributed.size()>=8,"A stride of sixteen must not collapse to one hot bucket");
+    }
+    @Test void definiteDeadlockRetriesStartANewTransactionAndDoNotDoubleApplyWrites() {
+        var attempts=new java.util.concurrent.atomic.AtomicInteger();
+        admission.execute(park,()->{
+            db.update("update user set balance=balance+1 where id=?",user);
+            if(attempts.getAndIncrement()==0)throw new org.springframework.dao.CannotAcquireLockException("test rollback",new java.sql.SQLException("deadlock","40001",1213));
+            return true;
+        });
+        assertEquals(2,attempts.get());assertEquals(0,new BigDecimal("21.00").compareTo(db.queryForObject("select balance from user where id=?",BigDecimal.class,user)));
+    }
+    @Test void outerTransactionsCannotBypassTheAdmissionBudget() {
+        new org.springframework.transaction.support.TransactionTemplate(transactions).executeWithoutResult(t->
+            assertThrows(IllegalStateException.class,()->flow.reserve(user,space)));
+        assertEquals(2,available());
+    }
+    @Test void waitingOnOneSpaceDoesNotSerializeTheWholeParkingLot() throws Exception {
+        var held=new CountDownLatch(1);var release=new CountDownLatch(1);var pool=Executors.newFixedThreadPool(3);
+        try {
+            var blocker=pool.submit(()->new org.springframework.transaction.support.TransactionTemplate(transactions).execute(t->{
+                db.queryForObject("select id from spaces where id=? for update",Integer.class,space);
+                held.countDown();try{release.await(5,TimeUnit.SECONDS);}catch(InterruptedException e){throw new IllegalStateException(e);}return true;
+            }));
+            assertTrue(held.await(3,TimeUnit.SECONDS));
+            var blocked=pool.submit(()->flow.reserve(user,space));
+            Thread.sleep(150);
+            var independent=pool.submit(()->flow.reserve(user2,space2));
+            assertNotNull(independent.get(2,TimeUnit.SECONDS));
+            assertFalse(blocked.isDone());release.countDown();blocker.get(3,TimeUnit.SECONDS);assertNotNull(blocked.get(3,TimeUnit.SECONDS));
+            assertEquals(0,available());
+        }finally{release.countDown();pool.shutdownNow();}
+    }
+    @Test void expiryAndCancellationReleaseCapacityOnlyOnce() throws Exception {
+        int id=flow.reserve(user,space).getId();
+        db.update("update enter set expires_at=date_sub(now(3),interval 1 second) where id=?",id);
+        var pool=Executors.newFixedThreadPool(2);
+        try{var a=pool.submit(()->flow.cancel(user,id));var b=pool.submit(()->flow.expire(id));a.get(5,TimeUnit.SECONDS);b.get(5,TimeUnit.SECONDS);assertEquals(2,available());}
+        finally{pool.shutdownNow();}
+    }
     @Autowired javax.sql.DataSource dataSource;
     @Test void queuedParkingWriterWaitsBeforeAcquiringAJdbcConnection() throws Exception {
         int permits=(Integer)org.springframework.test.util.ReflectionTestUtils.getField(admission,"permits");

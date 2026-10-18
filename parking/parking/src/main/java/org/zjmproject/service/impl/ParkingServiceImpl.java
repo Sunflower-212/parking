@@ -13,6 +13,8 @@ import java.util.List;
 
 @Service
 public class ParkingServiceImpl implements ParkingService {
+    @Autowired private org.zjmproject.service.BackgroundTasks background;
+    @Autowired private org.zjmproject.service.ParkingCapacity capacity;
     @Autowired private org.zjmproject.service.ReadCache cache;
     @Autowired private org.springframework.jdbc.core.JdbcTemplate db;
     private void validate(Parking p) {
@@ -24,11 +26,14 @@ public class ParkingServiceImpl implements ParkingService {
     private ParkingMapper parkingMapper;
 
     @Override
+    @org.springframework.transaction.annotation.Transactional
     public void addParking(Parking parking) {
         validate(parking);
         if(parking.getPark_storey()==null || parking.getPark_storey()<1) throw new IllegalArgumentException("停车场至少需要一层");
         parking.setPark_mount(0); parking.setPark_spare(0);
-        parkingMapper.addParking(parking);cache.invalidateAfterCommit("catalog");
+        parkingMapper.addParking(parking);
+        capacity.rebuild(parking.getId());
+        background.audit("parking.create",List.of(parking.getId()));cache.invalidateAfterCommit("catalog");
     }
 
     @Override
@@ -36,8 +41,11 @@ public class ParkingServiceImpl implements ParkingService {
     public void updateParking(Parking parking) {
         validate(parking);
         db.queryForObject("select id from parking where id=? for update",Integer.class,parking.getId());
-        if(db.queryForObject("select coalesce(max(spaces_storey),0) from spaces where park_id=?",Integer.class,parking.getId())>parking.getPark_storey()) throw new IllegalArgumentException("现有地图超出目标楼层，请先调整地图");
-        parkingMapper.updateParking(parking);cache.invalidateAfterCommit("catalog");cache.invalidateAfterCommit("layout:"+parking.getId());
+        // The controller may have established an older repeatable-read snapshot before
+        // obtaining the metadata lock. Use a current read for the structural invariant.
+        var top=db.queryForList("select spaces_storey from spaces where park_id=? order by spaces_storey desc limit 1 for share",Integer.class,parking.getId());
+        if(!top.isEmpty() && top.get(0)>parking.getPark_storey()) throw new IllegalArgumentException("现有地图超出目标楼层，请先调整地图");
+        parkingMapper.updateParking(parking);background.audit("parking.update",List.of(parking.getId()));cache.invalidateAfterCommit("catalog");cache.invalidateAfterCommit("layout:"+parking.getId());
     }
 
     @Override
@@ -95,15 +103,7 @@ public class ParkingServiceImpl implements ParkingService {
 
     @Override
     public Parking findParkById(Integer parkId) {return parkingMapper.findParkById(parkId);}
-    @Override
-    public void addParkSpare(Integer parkId) {
-        parkingMapper.addParkSpare(parkId);
-    }
 
-    @Override
-    public void reduceParkSpare(Integer parkId) {
-        parkingMapper.reduceParkSpare(parkId);
-    }
 
     @Override
     public String getAdminNameByParkName(String parkName) {

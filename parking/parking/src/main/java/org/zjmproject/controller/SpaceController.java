@@ -9,6 +9,7 @@ import java.util.*;
 @RestController
 @RequestMapping("/spaces")
 public class SpaceController {
+    @org.springframework.beans.factory.annotation.Autowired private BackgroundTasks background;
     @org.springframework.beans.factory.annotation.Autowired private FloorService floors;
     @org.springframework.beans.factory.annotation.Autowired private ReadCache cache;
     private final SpacesService spaces;
@@ -29,14 +30,14 @@ public class SpaceController {
         validate(s);int park=lockPark(s.getPark_name());
         if(db.queryForObject("select park_storey from parking where id=?",Integer.class,park)<s.getSpaces_storey()) throw new IllegalArgumentException("楼层超出停车场范围");
         spaces.addSpace(s.getPark_name(),s.getSpaces_name(),s.getSpaces_row(),s.getSpaces_col(),s.getSpaces_storey(),s.getSpaces_flag());
-        flow.refreshCapacity(park);cache.invalidateAfterCommit("layout:"+park);return Result.success();
+        flow.refreshCapacity(park);background.audit("layout.add",List.of(park));cache.invalidateAfterCommit("layout:"+park);return Result.success();
     }
     @Transactional @PutMapping("/update") public Result<?> update(@RequestBody Spaces s) {
         validate(s);int park=lockPark(s.getPark_name());
         Spaces current=spaces.findSpacesByInfo(s.getPark_name(),s.getSpaces_row(),s.getSpaces_col(),s.getSpaces_storey());
         if(current==null) throw new IllegalArgumentException("车位不存在");
         if(current.getActive_enter_id()!=null || current.getSpaces_flag()==1) throw new IllegalStateException("预约中或在场车位不能修改");
-        spaces.updateSpace(current.getId(),s.getSpaces_name(),s.getSpaces_flag(),null);flow.refreshCapacity(park);cache.invalidateAfterCommit("layout:"+park);return Result.success();
+        spaces.updateSpace(current.getId(),s.getSpaces_name(),s.getSpaces_flag(),null);flow.refreshCapacity(park);background.audit("layout.update",List.of(park));cache.invalidateAfterCommit("layout:"+park);return Result.success();
     }
     @Transactional @DeleteMapping("/deleteBatch") public Result<?> delete(@RequestBody List<Spaces> requested) {
         if(requested.isEmpty() || requested.size()>1000) throw new IllegalArgumentException("请选择1至1000个车位");
@@ -50,7 +51,7 @@ public class SpaceController {
         for(Spaces s:existing) {
             if(db.update("delete from spaces where id=? and spaces_flag<>1 and active_enter_id is null",s.getId())!=1) throw new IllegalStateException("预约中或在场车位不能删除");
         }
-        parks.forEach(flow::refreshCapacity);parks.forEach(id->cache.invalidateAfterCommit("layout:"+id));return Result.success();
+        parks.forEach(flow::refreshCapacity);background.audit("layout.delete",parks);parks.forEach(id->cache.invalidateAfterCommit("layout:"+id));return Result.success();
     }
     @GetMapping("/layout") public Result<?> layout(@RequestParam Integer park_id,@RequestParam Integer spaces_storey){return Result.success(floors.layout(park_id,spaces_storey));}
     @GetMapping("/availability") public Result<?> availability(@RequestParam Integer park_id,@RequestParam Integer spaces_storey){return Result.success(floors.availability(park_id,spaces_storey));}

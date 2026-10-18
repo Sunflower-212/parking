@@ -1,9 +1,9 @@
-"""Export the two immutable Git snapshots; optionally build their four historical images."""
+"""Export immutable Git snapshots; optionally build historical benchmark images."""
 import argparse,subprocess,zipfile
 from pathlib import Path
 
 ROOT=Path(__file__).resolve().parents[1]
-VERSIONS={'original':('797313c','parking-baseline'),'released':('21d3012','parking-released')}
+VERSIONS={'original':('797313c','parking-baseline'),'released':('21d3012','parking-released'),'current':('1867459','parking-current')}
 if __name__=='__main__':
     parser=argparse.ArgumentParser();parser.add_argument('--build',action='store_true');args=parser.parse_args()
     base=ROOT/'.work/benchmark-sources';base.mkdir(parents=True,exist_ok=True)

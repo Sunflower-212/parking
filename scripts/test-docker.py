@@ -4,13 +4,18 @@ from urllib.request import Request, urlopen
 from urllib.parse import urlencode
 from urllib.error import HTTPError, URLError
 import json
+import os
 import subprocess
 import time
 import uuid
 
 root = Path(__file__).resolve().parents[1]
 env = dict(line.split('=', 1) for line in (root / '.env').read_text(encoding='utf-8').splitlines() if line and not line.startswith('#') and '=' in line)
-base = 'http://127.0.0.1:' + env.get('HTTP_PORT', '8088')
+project = os.environ.get('PARKING_COMPOSE_PROJECT', 'parking')
+if project not in ('parking', 'parking-verification'):
+    raise SystemExit('Smoke tests support only parking or parking-verification')
+compose_files = ['-f', 'compose.yml', '-f', 'compose.test.yml' if project == 'parking-verification' else 'compose.dev.yml']
+base = 'http://127.0.0.1:' + ('28088' if project == 'parking-verification' else env.get('HTTP_PORT', '8088'))
 prefix = 'sm' + uuid.uuid4().hex[:8]
 
 def api(path, token=None, body=None, method='GET', form=False):
@@ -28,10 +33,10 @@ def api(path, token=None, body=None, method='GET', form=False):
     return result.get('data')
 
 def compose(*args):
-    subprocess.run(['docker', 'compose', '-f', 'compose.yml', '-f', 'compose.dev.yml', *args], cwd=root, check=True, stdout=subprocess.DEVNULL)
+    subprocess.run(['docker', 'compose', '-p', project, *compose_files, *args], cwd=root, check=True, stdout=subprocess.DEVNULL)
 
 def sql(statement):
-    command = ['docker', 'compose', 'exec', '-T', 'mysql', 'sh', '-c', 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec mysql -uroot --default-character-set=utf8mb4 --batch --skip-column-names parking_springboot']
+    command = ['docker', 'compose', '-p', project, *compose_files, 'exec', '-T', 'mysql', 'sh', '-c', 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec mysql -uroot --default-character-set=utf8mb4 --batch --skip-column-names parking_springboot']
     result = subprocess.run(command, input=statement, encoding='utf-8', cwd=root, capture_output=True, check=True)
     return result.stdout.strip()
 
@@ -113,7 +118,7 @@ try:
     compose('restart', 'mysql', 'redis', 'backend')
     healthy()
     assert sql(f'SELECT COUNT(*) FROM enter WHERE user_id={user_id} AND reservation=2;') == '2'
-    assert sql(f'SELECT park_spare FROM parking WHERE id={park};') == '2'
+    assert sql(f'SELECT park_spare FROM parking_capacity_total WHERE park_id={park};') == '2'
     assert recovered_user(user)['id'] == user_id
     print('PASS: MySQL records, Redis login and capacity survive container restarts')
 finally:

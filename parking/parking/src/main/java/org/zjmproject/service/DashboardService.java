@@ -22,7 +22,7 @@ public class DashboardService {
         String scope="";
         if(role==0) {scope+=" and p.admin_id=?";scopeArgs.add(actor);}
         if(parkId!=null) {scope+=" and p.id=?";scopeArgs.add(parkId);}
-        Map<String,Object> counts=new LinkedHashMap<>(db.queryForMap("select count(*) parkingNumber,coalesce(sum(park_mount),0) totalSpaces,coalesce(sum(park_spare),0) availableSpaces from parking p where 1=1"+scope,scopeArgs.toArray()));
+        Map<String,Object> counts=new LinkedHashMap<>(db.queryForMap("select count(*) parkingNumber,coalesce(sum(c.park_mount),0) totalSpaces,coalesce(sum(c.park_spare),0) availableSpaces from parking p join parking_capacity_total c on c.park_id=p.id where 1=1"+scope,scopeArgs.toArray()));
         List<Object> args=new ArrayList<>(List.of(first.atStartOfDay(),today.plusDays(1).atStartOfDay()));args.addAll(scopeArgs);
         var entries=db.queryForList("select date(e.enter_time) day,count(*) entered from enter e join parking p on p.id=e.park_id where e.enter_time>=? and e.enter_time<? and e.flag<>0"+scope+" group by date(e.enter_time)",args.toArray());
         var orders=db.queryForList("select date(o.create_time) day,count(*) exited,coalesce(sum(o.moneys),0) revenue from orders o join parking p on p.id=o.park_id where o.create_time>=? and o.create_time<?"+scope+" group by date(o.create_time)",args.toArray());

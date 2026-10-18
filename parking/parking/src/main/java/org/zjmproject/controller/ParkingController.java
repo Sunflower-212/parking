@@ -17,6 +17,7 @@ import java.util.Map;
 @RestController
 @RequestMapping("/parking")
 public class ParkingController {
+    @Autowired private org.zjmproject.service.BackgroundTasks background;
     @Autowired private org.zjmproject.service.AccessGuard access;
     @Autowired private org.zjmproject.service.FloorService floors;
     @Autowired private org.springframework.jdbc.core.JdbcTemplate db;
@@ -178,13 +179,13 @@ public class ParkingController {
                 String adminName = (String) map.get("adminname");
                 String thisAdminName = findParking.getAdmin_name();
                 if(adminName.equals(thisAdminName)){
-                    parkingService.deleteParkingByParkingName(park_name);
+                    parkingService.deleteParkingByParkingName(park_name);background.audit("parking.delete",List.of(parkingId));
                     return Result.success();
                 }
                 break;
             }
             case 1:{
-                parkingService.deleteParkingByParkingName(park_name);
+                parkingService.deleteParkingByParkingName(park_name);background.audit("parking.delete",List.of(parkingId));
                 return Result.success();
             } default:
                 break;

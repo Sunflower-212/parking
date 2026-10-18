@@ -26,6 +26,7 @@ backups/
 *-backup.sql
 *.dump
 uploads/
+exports/
 *.log
 *.zip
 *.jar

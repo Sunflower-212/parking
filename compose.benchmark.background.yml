@@ -1,0 +1,27 @@
+services:
+  rabbitmq:
+    profiles: [background]
+    image: rabbitmq:4.1.4-management@sha256:294b01e1796a8acede4619f32a1c394fae1f8021e57986ea01aad38dc2a4f502
+    hostname: parking-benchmark-rabbitmq
+    mem_limit: 512m
+    environment:
+      RABBITMQ_DEFAULT_USER: parking
+      RABBITMQ_DEFAULT_PASS: ${BENCH_RABBIT_PASSWORD:?Set isolated benchmark credential}
+      RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS: '-rabbit vm_memory_high_watermark 0.6 disk_free_limit 536870912'
+    volumes: [benchmark-rabbitmq:/var/lib/rabbitmq]
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 4s
+      retries: 30
+  backend:
+    environment:
+      BACKGROUND_TASKS_ENABLED: "true"
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_USER: parking
+      RABBITMQ_PASSWORD: ${BENCH_RABBIT_PASSWORD:?Set isolated benchmark credential}
+      EXPORT_DIR: /app/exports
+    volumes: [benchmark-exports:/app/exports]
+volumes:
+  benchmark-rabbitmq:
+  benchmark-exports:

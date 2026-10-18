@@ -52,14 +52,22 @@ def run(args):
         sampler=threading.Thread(target=sample,daemon=True);sampler.start()
         filename=f'{labels}-{round_no}.json'
         env={**os.environ,'BENCH_ADMIN_PASSWORD':bench.settings()['BENCH_ADMIN_PASSWORD']}
+        profile=getattr(args,'profile','mixed')
+        mounted=str(ROOT/'scripts')+':/scripts:ro' if profile in ('arrival','background') else str(ROOT/('scripts/benchmark-soak-k6.js' if profile=='soak' else 'scripts/benchmark-k6.js'))+':/scripts/benchmark.js:ro'
+        entry='/scripts/benchmark-'+profile+'-k6.js' if profile in ('arrival','background') else '/scripts/benchmark.js'
         command=['docker','run','--rm','--name','parking-benchmark-load','--network','parking-benchmark_default','--memory','1g','--cpus','4',
-            '-v',str(ROOT/'scripts/benchmark-k6.js')+':/scripts/benchmark.js:ro','-v',str(RESULTS)+':/results',
+            '-v',mounted,'-v',str(RESULTS)+':/results',
             '-e','BENCH_ADMIN_PASSWORD','-e','VERSION='+args.version,'-e','ROUND='+str(round_no),'-e','MODE='+args.mode,
-            '-e','WARMUP='+str(args.warmup),'-e','SECONDS='+str(args.seconds),'-e','CLIENTS='+str(args.clients),
-            '-e','RESULT_PATH=/results/'+filename,'grafana/k6:0.57.0','run','--quiet','/scripts/benchmark.js']
+            '-e','WARMUP='+str(args.warmup),'-e','SECONDS='+str(args.seconds),'-e','CLIENTS='+str(args.clients),'-e','PROFILE='+getattr(args,'profile','mixed'),
+            '-e','RESULT_PATH=/results/'+filename,'grafana/k6:0.57.0','run','--quiet',entry]
         try:
             result=subprocess.run(command,cwd=ROOT,env=env,capture_output=True)
         finally:stop.set();sampler.join(timeout=10)
+        # Keep teardown probes even if subsequent SQL/telemetry collection is interrupted.
+        # These private files contain fixture telemetry and stay under ignored .work.
+        (RESULTS/(filename+'.stdout')).write_bytes(result.stdout)
+        (RESULTS/(filename+'.stderr')).write_bytes(result.stderr)
+        (RESULTS/(filename+'.resources.json')).write_text(json.dumps(samples))
         after=digest();after_redis={s:redis_info(s) for s in ('redis','redis-cache')}
         if result.returncode:
             print(result.stdout.decode(errors='replace')[-3500:]);print(result.stderr.decode(errors='replace')[-1500:]);raise RuntimeError('k6 failed')
@@ -69,6 +77,12 @@ def run(args):
         data['backend_image_id']=subprocess.check_output(['docker','inspect','--format','{{.Image}}','parking-benchmark-backend-1']).decode().strip()
         data['business_date_start']=business_date
         data['business_date_end']=root_sql('SELECT CURRENT_DATE;').strip()
+        expiry=re.findall(r'EXPIRY_PROBE=(\{.*\})',result.stdout.decode(errors='replace')+'\n'+result.stderr.decode(errors='replace'))
+        if expiry:data['expiry_probe']=json.loads(expiry[-1].replace('\\"','"'))
+        later=re.findall(r'LATER_COHORT_PROBE=(\{.*\})',result.stdout.decode(errors='replace')+'\n'+result.stderr.decode(errors='replace'))
+        if later:data['later_expiry_probe']=json.loads(later[-1].replace('\\"','"'))
+        export=re.findall(r'BACKGROUND_EXPORT=(\{.*\})',result.stdout.decode(errors='replace')+'\n'+result.stderr.decode(errors='replace'))
+        if export:data['background_export_submission']=json.loads(export[-1].replace('\\"','"'))
         matches=re.findall(r'SERVER_METRICS=(\{.*\})',result.stdout.decode(errors='replace')+'\n'+result.stderr.decode(errors='replace'))
         if matches:
             current_metrics=json.loads(matches[-1].replace('\\"','"'))

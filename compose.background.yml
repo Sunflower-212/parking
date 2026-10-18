@@ -1,0 +1,29 @@
+services:
+  rabbitmq:
+    profiles: [background]
+    image: rabbitmq:4.1.4-management@sha256:294b01e1796a8acede4619f32a1c394fae1f8021e57986ea01aad38dc2a4f502
+    hostname: parking-rabbitmq
+    mem_limit: ${RABBITMQ_MEMORY_LIMIT:-512m}
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-parking}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD}
+      RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS: '-rabbit vm_memory_high_watermark 0.6 disk_free_limit 536870912'
+    ports: ["127.0.0.1:${RABBITMQ_MANAGEMENT_PORT:-15672}:15672"]
+    volumes: [rabbitmq-data:/var/lib/rabbitmq]
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+  backend:
+    environment:
+      BACKGROUND_TASKS_ENABLED: ${BACKGROUND_TASKS_ENABLED:-false}
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_USER: ${RABBITMQ_USER:-parking}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD}
+      EXPORT_DIR: /app/exports
+    volumes: [export-data:/app/exports]
+volumes:
+  rabbitmq-data:
+  export-data:

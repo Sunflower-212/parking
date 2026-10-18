@@ -19,13 +19,13 @@ jobs:
       - name: Start isolated verification infrastructure
         run: |
           python3 scripts/init-env.py
-          docker compose -p parking-verification -f compose.yml -f compose.test.yml up -d --wait mysql redis redis-cache
+          docker compose -p parking-verification -f compose.yml -f compose.background.yml -f compose.test.yml -f compose.background.test.yml --profile background up -d --wait mysql redis redis-cache rabbitmq
       - name: Backend and migration tests
         run: |
           set -a
           source .env
           set +a
-          export PARKING_INTEGRATION_TESTS=true PARKING_COMPOSE_PROJECT=parking-verification
+          export PARKING_INTEGRATION_TESTS=true PARKING_BACKGROUND_TESTS=true PARKING_DOCKER_RECOVERY_TESTS=true PARKING_COMPOSE_PROJECT=parking-verification
           export TEST_DB_URL='jdbc:mysql://127.0.0.1:23307/parking_springboot?serverTimezone=Asia/Shanghai' TEST_REDIS_PORT=26380 TEST_CACHE_PORT=26381
           cd parking/parking
           sh ./mvnw -B verify
@@ -40,13 +40,14 @@ jobs:
           npm run build
       - name: Browser verification against production containers
         run: |
-          docker compose -p parking-verification -f compose.yml -f compose.test.yml up -d --build --wait backend frontend
           set -a
           source .env
           set +a
+          export BACKGROUND_TASKS_ENABLED=true
+          docker compose -p parking-verification -f compose.yml -f compose.background.yml -f compose.test.yml -f compose.background.test.yml --profile background up -d --build --wait backend frontend
           cd vue3/parking-vue
           npx playwright install --with-deps chromium
           npm run test:e2e
       - name: Stop verification services and retain volumes
         if: always()
-        run: docker compose -p parking-verification -f compose.yml -f compose.test.yml down
+        run: docker compose -p parking-verification -f compose.yml -f compose.background.yml -f compose.test.yml -f compose.background.test.yml --profile background down

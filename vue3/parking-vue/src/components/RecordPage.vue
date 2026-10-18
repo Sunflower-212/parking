@@ -6,6 +6,7 @@ import PageShell from './PageShell.vue'
 import SearchBar from './SearchBar.vue'
 import PagedTable from './PagedTable.vue'
 import StatusTag from './StatusTag.vue'
+import ExportUsers from './ExportUsers.vue'
 import { pages } from '@/config/pages'
 import { usePagedQuery } from '@/composables/usePagedQuery'
 import { useTokenStore } from '@/stores/token'
@@ -101,25 +102,6 @@ async function action(row, type) {
     submitting.value = false
   }
 }
-async function exportCsv() {
-  if (submitting.value) return
-  submitting.value = true
-  try {
-    const response = await request.get('/user/export', {
-      params: cleanQuery(query),
-      responseType: 'blob',
-    })
-    const url = URL.createObjectURL(response.data)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = 'users.csv'
-    a.click()
-    setTimeout(() => URL.revokeObjectURL(url), 1000)
-  } catch {
-  } finally {
-    submitting.value = false
-  }
-}
 async function loadSources() {
   if (props.page === 'parks') {
     sourcesController?.abort()
@@ -159,8 +141,8 @@ onBeforeUnmount(() => {
 <template>
   <PageShell :title="config.title" :description="config.description"
     ><template #actions
-      ><el-button v-if="config.export" :loading="submitting" @click="exportCsv">导出 CSV</el-button
-      ><el-button
+      ><ExportUsers v-if="config.export" :filters="query" />
+      <el-button
         v-if="config.create"
         type="primary"
         :disabled="sourcesLoading || !!sourcesError"

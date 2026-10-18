@@ -5,13 +5,13 @@
 <mapper namespace="org.zjmproject.mapper.ParkingMapper">
     <select id="findAllParking" resultMap="parkingResultMap">
         select
-            p.*,
+            p.id,p.admin_id,p.park_name,p.park_address,c.park_mount,c.park_spare,p.park_storey,p.rule_id,p.create_time,p.update_time,
             a.admin_name,
             r.rule_name,
             r.free_time,
             r.charging_unit,
             r.unit_cost
-        from parking p
+        from parking p join parking_capacity_total c on c.park_id=p.id
         left join
             admin a on p.admin_id = a.id
         left join
@@ -35,13 +35,13 @@
     </select>
     <select id="findParking" resultMap="parkingResultMap">
         select
-            p.*,
+            p.id,p.admin_id,p.park_name,p.park_address,c.park_mount,c.park_spare,p.park_storey,p.rule_id,p.create_time,p.update_time,
             r.rule_name,
             r.free_time,
             r.charging_unit,
             r.unit_cost,
             a.admin_name
-        from parking p
+        from parking p join parking_capacity_total c on c.park_id=p.id
         left join
             rule r on p.rule_id = r.id
         left join
@@ -62,13 +62,13 @@
     </select>
     <select id="findParkByParkName" resultMap="parkingResultMap">
         select
-            p.*,
+            p.id,p.admin_id,p.park_name,p.park_address,c.park_mount,c.park_spare,p.park_storey,p.rule_id,p.create_time,p.update_time,
             a.admin_name,
             r.rule_name,
             r.free_time,
             r.charging_unit,
             r.unit_cost
-        from parking p
+        from parking p join parking_capacity_total c on c.park_id=p.id
         left join
             admin a on p.admin_id = a.id
         left join
@@ -80,13 +80,13 @@
     </select>
     <select id="findParkById" resultMap="parkingResultMap">
         select
-        p.*,
+        p.id,p.admin_id,p.park_name,p.park_address,c.park_mount,c.park_spare,p.park_storey,p.rule_id,p.create_time,p.update_time,
         a.admin_name,
         r.rule_name,
         r.free_time,
         r.charging_unit,
         r.unit_cost
-        from parking p
+        from parking p join parking_capacity_total c on c.park_id=p.id
         left join
         admin a on p.admin_id = a.id
         left join
@@ -97,7 +97,7 @@
     <select id="getAdminNameByParkName" resultType="java.lang.String">
         select
             a.admin_name
-        from parking p
+        from parking p join parking_capacity_total c on c.park_id=p.id
         left join
             admin a on p.admin_id = a.id
         where p.park_name=#{parkName}

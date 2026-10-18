@@ -125,6 +125,27 @@ test('super administrator can search and sees validated user forms', async ({ pa
   }
   expect(errors).toEqual([])
 })
+
+test('super administrator can export filtered users and resume a background task', async ({ page }) => {
+  await login(page, process.env.BOOTSTRAP_ADMIN_USERNAME, process.env.BOOTSTRAP_ADMIN_PASSWORD, true)
+  await page.getByRole('link', { name: '用户管理' }).click()
+  await page.getByPlaceholder('请输入用户名').fill(user)
+  await page.getByRole('button', { name: '搜索', exact: true }).click()
+  await expect(page.getByRole('cell', { name: user, exact: true })).toBeVisible()
+  if (process.env.BACKGROUND_TASKS_ENABLED === 'true') {
+    await page.getByRole('button', { name: '导出 CSV', exact: true }).click()
+    await expect(page.getByText('导出处理中，可离开页面')).toBeVisible()
+    await page.reload()
+    const downloadButton = page.getByRole('button', { name: '下载文件（保留24小时）' })
+    await expect(downloadButton).toBeVisible({ timeout: 30000 })
+    const downloaded = page.waitForEvent('download'); await downloadButton.click()
+    expect((await downloaded).suggestedFilename()).toBe('users.csv')
+  } else {
+    const downloaded = page.waitForEvent('download')
+    await page.getByRole('button', { name: '导出 CSV', exact: true }).click()
+    expect((await downloaded).suggestedFilename()).toBe('users.csv')
+  }
+})
 test.describe('high density canvas interaction', () => {
   test.use({ deviceScaleFactor: 2 })
   test('selects the correct space after zooming and dragging', async ({ page }) => {

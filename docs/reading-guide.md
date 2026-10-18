@@ -32,9 +32,17 @@ flowchart LR
   Auth --> Controller[控制器]
   Controller --> Service[事务服务]
   Service --> MySQL[(MySQL)]
-  Controller --> Cache[独立 Redis 只读缓存]
-  Service --> Queue[Redis Token 与延迟队列]
+  Controller --> Cache[Caffeine 与独立 Redis 公共资料缓存]
+  Service -->|提交后投递预约到期| Queue[状态 Redis 与 Redisson 延迟队列]
+  MySQL -->|后台 Outbox 租约领取| Dispatcher[可选后台投递器]
+  Dispatcher -->|持久化消息与 Confirm| Rabbit[RabbitMQ]
+  Rabbit -->|手动 ACK| Consumer[导出与审计消费者]
+  Consumer -->|幂等效果与任务状态| MySQL
   Queue --> Service
+  Service --> Outbox[后台事件表 与业务同事务]
+  Outbox --> Rabbit[RabbitMQ 可选后台队列]
+  Rabbit --> Worker[导出与审计消费者]
+  Worker --> MySQL
 ```
 
 用户权限为 `-1`，停车场管理员为 `0`，超级管理员为 `1`。登录 Token 同时需要签名有效、未过期且等于 Redis 保存的当前 Token。重新登录、登出及重置密码使旧 Token 失效。
@@ -53,10 +61,14 @@ flowchart LR
 - `enter.space_id` 关联车位；`spaces.active_enter_id` 指向当前有效记录，释放时必须同时匹配。
 - `orders` 保存离场费用；`recharges` 保存支付状态及流水。
 - `reservation_event` 保存待投递和待完成的到期事件，不依赖进程内存保存业务事实。
+- `parking_capacity` 保存按车位ID固定CRC32哈希划分的容量计数，`parking_capacity_total` 汇总读取。
+- `background_event` 保存后台任务和投递租约；`admin_audit` 按事件ID保存幂等审计结果。导出文件存于私有数据卷，不作为公开静态资源。
 
-有效用户、有效车位的唯一索引防止同一资源被重复占用。服务先锁用户，再锁停车场及关联记录；同一停车场的地图编辑也锁停车场，避免与预约争抢。
+有效用户、有效车位的唯一索引防止同一资源被重复占用。车辆服务采用 READ COMMITTED，先锁用户，再对停车场资料加共享锁，按车位、入场记录、容量的顺序锁定和更新。多条同类记录按 ID/桶号排序。地图编辑和停车场归属变更使用资料排他锁，防止结构修改与车辆操作交叉。
 
-`park_mount`、`park_spare` 在地图结构变更时从实际车位重新计算；日常预约、入场和释放使用同事务条件增减余位，避免反复全量统计。道路、墙壁和出入口不计入容量。客户端提交的容量不能覆盖真实预约计数。
+容量保存于 `parking_capacity`，通过 `parking_capacity_total` 汇总读取；API 仍使用 `park_mount`、`park_spare` 字段。地图结构变更时从实际车位重新计算，日常占用与释放在同事务末尾条件增减。道路、墙壁和出入口不计入容量。客户端提交的容量不能覆盖真实预约计数。旧 `parking` 容量字段冻结，仅在停止写入后回填用于旧镜像回退。
+
+容量支持一桶与16桶实验模式，桶号由车位 ID 决定；应用配置必须与数据库设置相同。全局写入准入位于 JDBC 事务之前，有限重试仅适用于 MySQL 明确回滚的死锁，不重试提交结果不确定的网络错误。实现与切换步骤见[后台任务与容量优化](background-tasks.md)。
 
 ## 预约状态模型
 
@@ -106,7 +118,7 @@ AI 会话元数据保存在 MySQL，对话内容仍使用进程内 ChatMemory，
 
 - `DashboardService`：6 条聚合查询内完成超管统计；普通管理员使用 SQL 中的所属范围。按业务时区补齐无数据日期，不循环查询每一天。
 - `ReadCache`：独立 Redis 连接，全局随机版本防止并发回填旧值；事务提交后改变版本，回滚不失效。可选 Caffeine 仅用于公共元数据、规则展示与静态布局，本地有效期最多一秒。失效失败后回源，恢复时先更换版本，防止重新使用旧缓存。
-- `ParkingAdmission`：在开始数据库事务前进行有界排队，每个固定分组最多允许 4 个车辆状态事务进入，且不超过连接池容量的四分之一。用户、停车场、业务记录及车位的数据库锁顺序继续保留；已有外层事务时不再申请应用许可，避免引入锁反转。
+- `ParkingAdmission`：在获取 JDBC 连接和开始事务前使用全局公平信号量，默认8个许可、最多128个排队请求、等待上限5秒，为默认20连接池保留读取和后台预算；不再按停车场哈希分组。拒绝外层事务绕过准入，业务服务统一开启 READ COMMITTED 事务。只有明确回滚的MySQL 1213死锁最多重试两次，不重试提交结果不确定的故障。
 - `FloorService`：分开提供不含身份信息的静态布局和实时占用；布局可缓存，实时状态查数据库。
 - `MembershipService`：锁定用户后累加会员有效期，防止并发续期覆盖。
 - `PageQuery` 与查询校验拦截器：分页上限、日期顺序及状态校验，结束时清理 PageHelper 上下文。

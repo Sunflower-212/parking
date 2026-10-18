@@ -1,4 +1,20 @@
 spring:
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USER:parking}
+    password: ${RABBITMQ_PASSWORD:}
+    connection-timeout: 2s
+    requested-heartbeat: 15s
+    publisher-confirm-type: correlated
+    publisher-returns: true
+    listener:
+      simple:
+        acknowledge-mode: manual
+        prefetch: 1
+        default-requeue-rejected: true
+        recovery-interval: 5s
+        auto-startup: ${BACKGROUND_TASKS_ENABLED:false}
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
     url: ${DB_URL:jdbc:mysql://localhost:3306/parking_springboot?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai}
@@ -33,8 +49,12 @@ mybatis:
     default-statement-timeout: 5
   mapper-locations: classpath:org/zjmproject/mapper/*.xml
 parking:
+  capacity-buckets: ${CAPACITY_BUCKETS:16}
+  background:
+    enabled: ${BACKGROUND_TASKS_ENABLED:false}
+    export-dir: ${EXPORT_DIR:./exports}
   admission:
-    permits: ${PARKING_ADMISSION_PERMITS:4}
+    permits: ${PARKING_ADMISSION_PERMITS:8}
   cache:
     enabled: ${CACHE_ENABLED:false}
     host: ${CACHE_REDIS_HOST:localhost}
@@ -71,6 +91,10 @@ aliyun:
   bucket-name: ${OSS_BUCKET:}
   endpoint: ${OSS_ENDPOINT:}
 management:
+  health:
+    # Background delivery is optional; its backlog/failures are monitored separately.
+    rabbit:
+      enabled: false
   endpoints:
     web:
       exposure:

@@ -90,7 +90,19 @@ public class ReservationQueue {
             try {
                 String value=ready.pollLastAndOfferFirstTo(PROCESSING,5,TimeUnit.SECONDS);
                 if(value==null) continue;
-                try { flow.expire(Integer.parseInt(value)); processing.removeFirstOccurrence(value); }
+                try {
+                    int id=Integer.parseInt(value);
+                    // Completion is monotonic. A committed cancellation/entry/expiry needs no
+                    // user lock or write transaction when its delayed copy finally arrives.
+                    // Missing ledger rows still use the normal DB-state validation path.
+                    var completed=db.queryForList("select completed_at is not null from reservation_event where reservation_id=?",Boolean.class,id);
+                    if(!completed.isEmpty() && Boolean.TRUE.equals(completed.get(0))) {
+                        processing.removeFirstOccurrence(value);
+                        metrics.counter("parking.reservation.completed.skip").increment();
+                        continue;
+                    }
+                    flow.expire(id); processing.removeFirstOccurrence(value);
+                }
                 catch(Exception e) {
                     metrics.counter("parking.reservation.processing.failure").increment();
                     log.warn("Reservation {} processing failed ({})",value,e.getClass().getSimpleName());
