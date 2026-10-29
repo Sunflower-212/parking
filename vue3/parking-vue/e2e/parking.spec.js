@@ -248,6 +248,7 @@ test('map editor previews, undoes, saves atomically and retains a conflicting dr
   await page.getByRole('row').filter({has:page.getByRole('cell',{name:'A001',exact:true})}).getByRole('button',{name:'选择',exact:true}).click()
   async function dragAcrossThree() {
     await page.locator('canvas').scrollIntoViewIfNeeded()
+    await expect(page.locator('.map-main .el-loading-mask')).toBeHidden()
     // ResizeObserver and the camera's scheduled draw must settle before computing input coordinates.
     await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))))
     const bounds=await page.locator('canvas').boundingBox()
