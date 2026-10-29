@@ -1,7 +1,7 @@
 <script setup>
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { feedback as ElMessage, localFailure } from '@/utils/request-error-notice'
 import { useTokenStore } from '@/stores/token'
 import { loginService, userRegisterService } from '@/api/user'
 const router = useRouter(),
@@ -41,9 +41,11 @@ async function submit() {
     } else {
       const result = await loginService(data.value, role.value)
       token.setToken(result.data, remember.value)
+      ElMessage.success('登录成功')
       router.replace(role.value === '1' ? '/user' : '/admin')
     }
-  } catch {
+  } catch (error) {
+    localFailure(error, '操作未完成，请重试')
   } finally {
     busy.value = false
   }
@@ -59,24 +61,19 @@ function toggle() {
     <section class="login-intro">
       <router-link to="/" class="login-brand"><span class="brand-icon">P</span> 易停车</router-link>
       <div>
-        <span class="eyebrow">SMART PARKING</span>
         <h1>让停车，<br />更简单一点。</h1>
-        <p>便捷预约 · 有序出入 · 清晰管理</p>
+
         <div class="parking-visual" aria-hidden="true">
           <span v-for="i in 6" :key="i" :class="{ occupied: i === 2 || i === 5 }">{{
             i === 2 || i === 5 ? '▰' : 'P'
           }}</span>
         </div>
       </div>
-      <small>连接每一个车位，照顾每一次出行</small>
     </section>
     <section class="login-panel">
       <div class="login-form">
-        <span class="eyebrow">欢迎使用易停车</span>
         <h2>{{ registering ? '创建你的账号' : '欢迎回来' }}</h2>
-        <p class="muted">
-          {{ registering ? '注册后即可选择车位并预约' : '登录后继续使用停车服务与管理功能' }}
-        </p>
+
         <el-form
           ref="form"
           :model="data"
@@ -135,7 +132,6 @@ function toggle() {
           >统一身份登录</el-button
         >
       </div>
-      <small class="login-footnote">易停车 · 安全连接，有序出行</small>
     </section>
   </div>
 </template>
@@ -161,12 +157,6 @@ function toggle() {
   font-size: 24px;
   font-weight: 650;
 }
-.eyebrow {
-  font-size: 11px;
-  letter-spacing: 2px;
-  color: #6594e5;
-  font-weight: 600;
-}
 .login-intro h1 {
   font-size: clamp(38px, 4.3vw, 66px);
   line-height: 1.35;
@@ -176,9 +166,6 @@ function toggle() {
 .login-intro p {
   color: #a4b7d3;
   line-height: 2;
-}
-.login-intro small {
-  color: #7d94b8;
 }
 .parking-visual {
   display: grid;
@@ -247,12 +234,6 @@ function toggle() {
   display: block;
   margin: auto;
   font-size: 12px;
-}
-.login-footnote {
-  position: absolute;
-  bottom: 24px;
-  color: #a3adbc;
-  font-size: 11px;
 }
 @media (max-width: 767px) {
   .login-screen {

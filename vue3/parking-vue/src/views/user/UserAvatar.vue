@@ -1,6 +1,6 @@
 <script setup>
 import { ref, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
+import { feedback as ElMessage, localFailure } from '@/utils/request-error-notice'
 import request from '@/utils/request'
 import useUser from '@/stores/userInfo'
 import avatar from '@/assets/default.png'
@@ -38,14 +38,15 @@ async function upload() {
     store.setInfo({ ...store.info, user_pic: result.data })
     file.value = null
     ElMessage.success('头像已更新')
-  } catch {
+  } catch (error) {
+    localFailure(error, '操作未完成，请重试')
   } finally {
     busy.value = false
   }
 }
 </script>
 <template>
-  <PageShell title="更换头像" description="支持 JPEG、PNG 图片，文件大小不超过 5MB"
+  <PageShell title="更换头像"
     ><section class="surface">
       <el-alert
         v-if="!enabled"

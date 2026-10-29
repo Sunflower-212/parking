@@ -10,7 +10,6 @@ const roles = [
 export const pages = {
   users: {
     title: '用户管理',
-    description: '管理平台用户资料与账户访问',
     endpoint: '/user/pageList',
     filters: [
       text('user_name', '用户名'),
@@ -46,7 +45,6 @@ export const pages = {
   },
   admins: {
     title: '管理员管理',
-    description: '分配运营权限，管理员初始密码与账号相同',
     endpoint: '/admin/pageList',
     filters: [text('admin_name', '管理员账号'), select('permissions', '角色', roles)],
     columns: [
@@ -66,7 +64,6 @@ export const pages = {
   },
   rules: {
     title: '计费规则',
-    description: '共享规则由超级管理员维护，查看免费时长、计费单位和单位费用',
     endpoint: '/rule/pageList',
     filters: [text('rule_name', '规则名称')],
     columns: [
@@ -90,7 +87,6 @@ export const pages = {
   },
   parks: {
     title: '停车场管理',
-    description: '总车位和可用车位根据地图与车辆状态自动更新',
     endpoint: (role) => (role === 1 ? '/parking/selectAllParking' : '/parking/selectParking'),
     filters: [
       text('park_name', '停车场'),
@@ -120,7 +116,6 @@ export const pages = {
   },
   orders: {
     title: '订单管理',
-    description: '查看所属停车场的离场订单与费用',
     endpoint: '/orders/adminPageList',
     filters: [
       text('user_name', '用户名'),
@@ -140,7 +135,6 @@ export const pages = {
   },
   recharges: {
     title: '充值管理',
-    description: '平台充值流水，仅超级管理员可访问',
     endpoint: '/recharges/pageList',
     filters: [
       { key: 'amounts', label: '充值金额', type: 'number' },
@@ -158,7 +152,6 @@ export const pages = {
   },
   userOrders: {
     title: '订单记录',
-    description: '查看停车时长与实际扣费',
     endpoint: '/orders/userPageList',
     filters: [
       text('park_name', '停车场'),
@@ -177,7 +170,6 @@ export const pages = {
   },
   userRecharges: {
     title: '充值记录',
-    description: '查看支付状态与充值流水',
     endpoint: '/recharges/userPageList',
     filters: [
       { key: 'amounts', label: '金额', type: 'number' },
@@ -195,7 +187,6 @@ export const pages = {
   },
   userEntries: {
     title: '入场历史',
-    description: '预约与入场记录，以服务端状态为准',
     endpoint: '/enter/userPageList',
     filters: [text('park_name', '停车场'), { key: 'date', label: '日期', type: 'date' }],
     columns: [

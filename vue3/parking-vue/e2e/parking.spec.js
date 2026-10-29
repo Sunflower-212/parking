@@ -248,9 +248,12 @@ test('map editor previews, undoes, saves atomically and retains a conflicting dr
   await page.getByRole('row').filter({has:page.getByRole('cell',{name:'A001',exact:true})}).getByRole('button',{name:'选择',exact:true}).click()
   async function dragAcrossThree() {
     await page.locator('canvas').scrollIntoViewIfNeeded()
+    // ResizeObserver and the camera's scheduled draw must settle before computing input coordinates.
+    await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))))
     const bounds=await page.locator('canvas').boundingBox()
     const cellWidth=58*parseInt(await page.locator('.map-controls > span').innerText())/100
     const center={x:bounds.x+bounds.width/2,y:bounds.y+bounds.height/2}
+    expect(await page.evaluate(({x,y})=>document.elementFromPoint(x,y)?.tagName,center)).toBe('CANVAS')
     await page.mouse.move(center.x,center.y);await page.mouse.down()
     await page.mouse.move(center.x+2*cellWidth,center.y,{steps:8});await page.mouse.up()
   }

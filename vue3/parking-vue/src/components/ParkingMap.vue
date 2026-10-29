@@ -449,10 +449,7 @@ defineExpose({ fit, focus })
       </div>
     </div>
     <div class="map-foot">
-      <span
-        ><i class="live-dot" />
-        {{ editing ? '编辑预览 · 尚未影响正式地图' : '实时状态 · 以服务器确认为准' }}</span
-      ><span>{{ editing ? '框选多个位置 · Shift 追加选择' : '拖动平移 · 滚轮或双指缩放' }}</span>
+      <span><i class="live-dot" /> {{ editing ? '编辑草稿' : '实时状态' }}</span>
     </div>
   </section>
 </template>

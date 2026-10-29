@@ -1,7 +1,8 @@
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { jwtDecode } from 'jwt-decode'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessageBox } from 'element-plus'
+import { feedback as ElMessage, localFailure } from '@/utils/request-error-notice'
 import PageShell from './PageShell.vue'
 import SearchBar from './SearchBar.vue'
 import PagedTable from './PagedTable.vue'
@@ -67,11 +68,14 @@ async function save() {
       method: editing.value ? 'put' : 'post',
       data: model.value,
     })
-    ElMessage.success('保存成功')
     dialog.value = false
-    await load(!editing.value)
-  } catch {
-    /* error shown centrally */
+    const refreshed = await load(!editing.value, { feedback: false })
+    if (!disposed)
+      refreshed
+        ? ElMessage.success('保存成功')
+        : ElMessage.warning('保存成功，列表刷新失败，请刷新列表')
+  } catch (error) {
+    localFailure(error, '保存失败，请重试')
   } finally {
     submitting.value = false
   }
@@ -95,9 +99,14 @@ async function action(row, type) {
       await request.patch(config.reset, { [config.identity]: row[config.identity] })
     else
       await request.delete(config.remove, { params: { [config.identity]: row[config.identity] } })
-    ElMessage.success('操作成功')
-    await load()
-  } catch {
+    const message = type === 'reset' ? '密码已重置' : '删除成功'
+    const refreshed = await load(false, { feedback: false })
+    if (!disposed)
+      refreshed
+        ? ElMessage.success(message)
+        : ElMessage.warning(`${message}，列表刷新失败，请刷新列表`)
+  } catch (error) {
+    localFailure(error, type === 'reset' ? '密码重置失败，请重试' : '删除失败，请重试')
   } finally {
     submitting.value = false
   }
@@ -141,7 +150,7 @@ onBeforeUnmount(() => {
 })
 </script>
 <template>
-  <PageShell :title="config.title" :description="config.description"
+  <PageShell :title="config.title"
     ><template #actions
       ><ExportUsers v-if="config.export" :filters="query" />
       <el-button

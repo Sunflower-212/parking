@@ -1,6 +1,6 @@
 <script setup>
 import { ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { feedback as ElMessage, localFailure } from '@/utils/request-error-notice'
 import request from '@/utils/request'
 import useUser from '@/stores/userInfo'
 import PageShell from '@/components/PageShell.vue'
@@ -35,16 +35,21 @@ async function save() {
   busy.value = true
   try {
     await request.put('/user/update', model.value)
-    store.setInfo((await request.get('/user/userInfo')).data)
-    ElMessage.success('资料已更新')
-  } catch {
+    try {
+      store.setInfo((await request.get('/user/userInfo', { feedback: false })).data)
+      ElMessage.success('资料已更新')
+    } catch {
+      ElMessage.warning('资料已更新，账户刷新失败，请刷新页面')
+    }
+  } catch (error) {
+    localFailure(error, '操作未完成，请重试')
   } finally {
     busy.value = false
   }
 }
 </script>
 <template>
-  <PageShell title="基本资料" description="完善有效车牌后即可预约车位"
+  <PageShell title="基本资料"
     ><section class="surface">
       <el-form
         ref="form"

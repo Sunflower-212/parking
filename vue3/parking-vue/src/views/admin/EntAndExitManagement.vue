@@ -28,7 +28,7 @@ async function load() {
 onMounted(load)
 </script>
 <template>
-  <PageShell title="出入口管理" description="选择停车场，通过摄像头拍照或上传图片完成车辆出入"
+  <PageShell title="出入口管理"
     ><template #actions
       ><el-select
         v-model="parkId"

@@ -1,6 +1,6 @@
 <script setup>
 import { ref, nextTick, onBeforeUnmount } from 'vue'
-import { ElMessage } from 'element-plus'
+import { feedback as ElMessage, localFailure } from '@/utils/request-error-notice'
 import request from '@/utils/request'
 const props = defineProps({ mode: String, parkId: Number, enabled: Boolean }),
   video = ref(),
@@ -65,24 +65,32 @@ async function uploadFile(e) {
     ElMessage.warning('请选择5MB以内的JPEG或PNG图片')
     return
   }
-  const bitmap = await createImageBitmap(file)
-  if (disposed) {
-    bitmap.close()
-    return
+  let bitmap
+  hasPhoto.value = false
+  try {
+    bitmap = await createImageBitmap(file)
+    if (disposed) {
+      return
+    }
+    // 上传前限制图片最长边，降低车牌识别请求体与网络耗时；后端仍独立校验类型和大小。
+    const ratio = Math.min(1, 1600 / Math.max(bitmap.width, bitmap.height))
+    canvas.value.width = bitmap.width * ratio
+    canvas.value.height = bitmap.height * ratio
+    canvas.value.getContext('2d').drawImage(bitmap, 0, 0, canvas.value.width, canvas.value.height)
+    hasPhoto.value = true
+  } catch (error) {
+    if (!disposed) localFailure(error, '图片无法读取，请重新选择 JPEG 或 PNG 图片')
+  } finally {
+    bitmap?.close()
+    e.target.value = ''
   }
-  // 上传前限制图片最长边，降低车牌识别请求体与网络耗时；后端仍独立校验类型和大小。
-  const ratio = Math.min(1, 1600 / Math.max(bitmap.width, bitmap.height))
-  canvas.value.width = bitmap.width * ratio
-  canvas.value.height = bitmap.height * ratio
-  canvas.value.getContext('2d').drawImage(bitmap, 0, 0, canvas.value.width, canvas.value.height)
-  bitmap.close()
-  hasPhoto.value = true
 }
 async function submit() {
   if (busy.value || !props.parkId || !hasPhoto.value) return
   busy.value = true
   try {
     const blob = await new Promise((resolve) => canvas.value.toBlob(resolve, 'image/jpeg', 0.85))
+    if (!blob) throw new Error('image encoding failed')
     const data = new FormData()
     data.append('file', blob, 'plate.jpg')
     data.append('park_id', props.parkId)
@@ -93,7 +101,8 @@ async function submit() {
     plate.value = result.data
     hasPhoto.value = false
     ElMessage.success(props.mode === 'enter' ? '入场完成' : '离场完成')
-  } catch {
+  } catch (error) {
+    localFailure(error, '车辆操作未完成，请重试')
   } finally {
     busy.value = false
   }
@@ -108,9 +117,6 @@ onBeforeUnmount(() => {
   <section class="surface gate-lane">
     <header>
       <h2>{{ mode === 'enter' ? '车辆入场' : '车辆离场' }}</h2>
-      <el-tag :type="mode === 'enter' ? 'success' : 'warning'">{{
-        mode === 'enter' ? 'ENTRY' : 'EXIT'
-      }}</el-tag>
     </header>
     <video ref="video" autoplay muted playsinline class="gate-video" />
     <div class="gate-controls">

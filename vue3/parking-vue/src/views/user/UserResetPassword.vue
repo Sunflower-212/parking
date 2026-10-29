@@ -1,7 +1,7 @@
 <script setup>
 import { ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { feedback as ElMessage, localFailure } from '@/utils/request-error-notice'
 import request from '@/utils/request'
 import { useTokenStore } from '@/stores/token'
 import useUser from '@/stores/userInfo'
@@ -42,14 +42,15 @@ async function save() {
     admin.removeInfo()
     ElMessage.success('密码已修改，请重新登录')
     router.replace('/login')
-  } catch {
+  } catch (error) {
+    localFailure(error, '操作未完成，请重试')
   } finally {
     busy.value = false
   }
 }
 </script>
 <template>
-  <PageShell title="修改密码" description="修改成功后当前登录状态将失效"
+  <PageShell title="修改密码"
     ><section class="surface">
       <el-form
         ref="form"

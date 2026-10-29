@@ -3,6 +3,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { jwtDecode } from 'jwt-decode'
 import { ElMessageBox } from 'element-plus'
+import { feedback as ElMessage } from '@/utils/request-error-notice'
 import { Menu, Fold, Expand, SwitchButton, ArrowRight } from '@element-plus/icons-vue'
 import request from '@/utils/request'
 import { useTokenStore } from '@/stores/token'
@@ -90,6 +91,7 @@ async function logout() {
     adminStore.removeInfo()
     userStore.removeInfo()
     router.replace('/login')
+    ElMessage.success('已退出登录')
   } catch {
     /* request interceptor explains failure */
   }
@@ -101,10 +103,9 @@ onMounted(load)
     <div v-if="mobileOpen" class="sidebar-mask" @click="mobileOpen = false" />
     <aside class="sidebar" :class="{ open: mobileOpen }">
       <router-link class="brand" :to="prefix"
-        ><span class="brand-icon">P</span
-        ><span v-if="!collapsed">易停车<small>PARKING CONSOLE</small></span></router-link
+        ><span class="brand-icon">P</span><span v-if="!collapsed">易停车</span></router-link
       >
-      <p class="nav-caption" v-if="!collapsed">{{ admin ? '运营工作台' : '我的停车服务' }}</p>
+
       <nav aria-label="主导航">
         <router-link
           v-for="item in menu"
@@ -116,7 +117,6 @@ onMounted(load)
           ><span v-if="!collapsed">{{ item[1] }}</span></router-link
         >
       </nav>
-      <div class="sidebar-bottom" v-if="!collapsed">让每一次停车更从容</div>
     </aside>
     <div class="workspace">
       <header class="topbar">
@@ -152,7 +152,6 @@ onMounted(load)
           ><template #extra><el-button @click="load">重新加载</el-button></template></el-result
         ><router-view v-else />
       </main>
-      <footer class="app-footer">易停车 · 停车管理系统</footer>
     </div>
   </div>
 </template>

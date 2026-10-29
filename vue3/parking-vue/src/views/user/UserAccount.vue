@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
-import { ElMessage } from 'element-plus'
+import { feedback as ElMessage, localFailure } from '@/utils/request-error-notice'
 import DOMPurify from 'dompurify'
 import request from '@/utils/request'
 import useUser from '@/stores/userInfo'
@@ -11,6 +11,7 @@ const store = useUser(),
   info = computed(() => store.info),
   busy = ref(false),
   loading = ref(false),
+  accountError = ref(''),
   amount = ref(100),
   days = ref(30),
   capabilities = ref({}),
@@ -20,14 +21,20 @@ const store = useUser(),
   formContainer = ref()
 let disposed = false,
   refreshing = false
-async function refresh() {
+async function refresh(silent = false) {
   if (refreshing) return
   refreshing = true
   loading.value = true
   try {
-    const result = await request.get('/user/userInfo')
-    if (!disposed) store.setInfo(result.data)
+    const result = await request.get('/user/userInfo', { feedback: !silent })
+    if (!disposed) {
+      store.setInfo(result.data)
+      accountError.value = ''
+    }
+    return true
   } catch {
+    if (!disposed) accountError.value = '账户刷新失败，请重试'
+    return false
   } finally {
     refreshing = false
     loading.value = false
@@ -42,10 +49,13 @@ async function membership() {
       renew ? '/user/vipRenewal' : '/user/getVip',
       new URLSearchParams({ days: days.value }),
     )
-    ElMessage.success('会员信息已更新')
     // 会员变更成功后重新获取服务端账户信息，避免余额或会员标签继续显示旧状态。
-    await refresh()
-  } catch {
+    const refreshed = await refresh(true)
+    refreshed
+      ? ElMessage.success('会员信息已更新')
+      : ElMessage.warning('会员信息已更新，账户刷新失败，请重试')
+  } catch (error) {
+    localFailure(error, '会员操作失败，请重试')
   } finally {
     busy.value = false
   }
@@ -65,22 +75,28 @@ async function recharge() {
     payment.value = result.data
     paymentHtml.value = DOMPurify.sanitize(result.data.form)
     dialog.value = true
-  } catch {
+    ElMessage.success('充值单已创建')
+  } catch (error) {
+    localFailure(error, '创建充值单失败，请重试')
   } finally {
     busy.value = false
   }
 }
 function pay() {
-  const form = formContainer.value?.querySelector('form')
-  if (!form) return
-  const address = new URL(form.action)
-  if (address.protocol !== 'https:' || !/(^|\.)alipay(dev)?\.com$/.test(address.hostname)) {
-    ElMessage.error('支付地址无效')
-    return
+  try {
+    const form = formContainer.value?.querySelector('form')
+    if (!form) throw new Error('missing form')
+    const address = new URL(form.action)
+    if (address.protocol !== 'https:' || !/(^|\.)alipay(dev)?\.com$/.test(address.hostname)) {
+      ElMessage.error('支付地址无效')
+      return
+    }
+    form.target = '_blank'
+    form.rel = 'noopener'
+    form.submit()
+  } catch (error) {
+    localFailure(error, '支付页面不可用，请刷新充值单')
   }
-  form.target = '_blank'
-  form.rel = 'noopener'
-  form.submit()
 }
 async function cancel() {
   if (busy.value) return
@@ -95,11 +111,11 @@ async function cancel() {
   } catch {
   } finally {
     busy.value = false
-    refresh()
+    refresh(true)
   }
 }
 function focus() {
-  if (!document.hidden) refresh()
+  if (!document.hidden) refresh(true)
 }
 onMounted(async () => {
   refresh()
@@ -116,14 +132,17 @@ onBeforeUnmount(() => {
 })
 </script>
 <template>
-  <PageShell title="个人账户" description="查看余额和会员权益，支付结果以账户实际入账为准"
+  <PageShell title="个人账户"
     ><template #actions
-      ><el-button :loading="loading" @click="refresh">刷新账户</el-button></template
+      ><el-button :loading="loading" @click="refresh(false)">刷新账户</el-button></template
+    >
+    <el-alert v-if="accountError" :title="accountError" type="error" :closable="false"
+      ><el-button link @click="refresh(false)">重试</el-button></el-alert
     >
     <div class="account-grid" v-loading="loading">
       <section class="surface">
         <span class="muted">账户余额</span><strong>{{ money(info.balance) }}</strong>
-        <p class="muted">停车离场时按计费规则自动扣除余额。</p>
+
         <el-divider />
         <h3>余额充值</h3>
         <el-alert
@@ -146,7 +165,6 @@ onBeforeUnmount(() => {
             >支付宝充值</el-button
           ></el-form
         >
-        <p class="account-note">当前接入支付宝沙箱，微信支付尚未接入。</p>
       </section>
       <section class="surface">
         <span class="muted">会员状态</span
@@ -163,7 +181,6 @@ onBeforeUnmount(() => {
             info.vip_start_time ? '确认续期' : '确认开通'
           }}</el-button></el-form
         >
-        <p class="account-note">沿用系统现有会员规则，会员有效期内停车费用按现有规则处理。</p>
       </section>
     </div>
     <el-dialog
@@ -183,12 +200,6 @@ onBeforeUnmount(() => {
   >
 </template>
 <style scoped>
-.account-note {
-  font-size: 12px;
-  line-height: 1.8;
-  color: #94a3b8;
-  margin: 20px 0 0;
-}
 .surface h3 {
   font-size: 17px;
 }

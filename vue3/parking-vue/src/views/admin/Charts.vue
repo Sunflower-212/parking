@@ -61,7 +61,7 @@ onBeforeUnmount(() => {
 })
 </script>
 <template>
-  <PageShell title="运营概览" description="关注车位使用、出入场趋势与停车收入"
+  <PageShell title="运营概览"
     ><template #actions><el-button :loading="loading" @click="load">刷新统计</el-button></template>
     <div class="surface dashboard-filters">
       <el-select
@@ -77,7 +77,7 @@ onBeforeUnmount(() => {
           :key="d"
           :label="'最近 ' + d + ' 天'"
           :value="d" /></el-select
-      ><span class="muted">数据时间：{{ dateTime(data?.updatedAt) }} · 最长缓存 30 秒</span>
+      ><span class="muted">数据时间：{{ dateTime(data?.updatedAt) }}</span>
     </div>
     <el-alert v-if="error" :title="error" type="error" :closable="false"
       ><el-button link @click="load">重试</el-button></el-alert
@@ -85,9 +85,12 @@ onBeforeUnmount(() => {
     <div v-loading="loading">
       <div class="stat-grid">
         <article class="stat-card" v-for="card in cards" :key="card[0]">
-          <label>{{ card[0] }}</label
-          ><strong>{{ card[1] ?? '—' }}</strong
-          ><small>{{ card[2] }}</small>
+          <el-popover trigger="click" :content="card[2]" :width="240"
+            ><template #reference
+              ><el-button text class="stat-label">{{ card[0] }}</el-button></template
+            ></el-popover
+          >
+          <strong>{{ card[1] ?? '—' }}</strong>
         </article>
       </div>
       <div class="chart-grid" v-if="data">
@@ -111,7 +114,6 @@ onBeforeUnmount(() => {
             :data="data.series"
             :series="[{ key: 'rechargeAmount', label: '充值金额 / 元', type: 'bar' }]"
           />
-          <p class="muted">按充值单创建日期统计成功记录，与停车场收入分别展示。</p>
         </section>
       </div>
     </div>

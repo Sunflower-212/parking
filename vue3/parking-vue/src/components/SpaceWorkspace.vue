@@ -1,9 +1,11 @@
 <script setup>
 import { ref, shallowRef, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import { onBeforeRouteLeave } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessageBox } from 'element-plus'
+import { feedback as ElMessage, localFailure, showRequestError } from '@/utils/request-error-notice'
 import request from '@/utils/request'
 import PageShell from './PageShell.vue'
+import HelpPopover from './HelpPopover.vue'
 import ParkingMap from './ParkingMap.vue'
 import StatusTag from './StatusTag.vue'
 import { dateTime } from '@/utils/format'
@@ -142,7 +144,11 @@ async function refresh(silent = false) {
   refreshing.value = true
   error.value = ''
   try {
-    const options = { params: { park_id: park, spaces_storey: storey }, signal: controller.signal }
+    const options = {
+      params: { park_id: park, spaces_storey: storey },
+      signal: controller.signal,
+      feedback: !silent,
+    }
     let snapshot,
       entry = []
     if (props.admin) snapshot = (await request.get('/spaces/editor', options)).data
@@ -150,7 +156,10 @@ async function refresh(silent = false) {
       const [layout, state, currentEntry] = await Promise.all([
         request.get('/spaces/layout', options),
         request.get('/spaces/availability', options),
-        request.get('/enter/userEnterOrReservation', { signal: controller.signal }),
+        request.get('/enter/userEnterOrReservation', {
+          signal: controller.signal,
+          feedback: !silent,
+        }),
       ])
       const flags = new Map(state.data.map((c) => [c.id, c.spaces_flag]))
       snapshot = {
@@ -173,9 +182,11 @@ async function refresh(silent = false) {
     selected.value = selected.value.map((c) => byId.get(c.id)).filter(Boolean)
     if (!props.admin && prior?.spaces_flag === 0 && selected.value[0]?.spaces_flag === 1)
       ElMessage.warning('所选车位已不可用，请重新选择')
+    return true
   } catch (e) {
     if (!disposed && id === version && e.code !== 'ERR_CANCELED')
       error.value = '地图加载失败，请重试'
+    return false
   } finally {
     if (id === version) {
       loading.value = false
@@ -385,12 +396,16 @@ async function save() {
   loading.value = false
   refreshing.value = false
   try {
-    const result = await request.post('/spaces/layout/batch', {
-      parkId: parkId.value,
-      floor: floor.value,
-      baseRevision: baseRevision.value,
-      ...delta.value,
-    })
+    const result = await request.post(
+      '/spaces/layout/batch',
+      {
+        parkId: parkId.value,
+        floor: floor.value,
+        baseRevision: baseRevision.value,
+        ...delta.value,
+      },
+      { feedback: false },
+    )
     server.value = result.data
     updated.value = new Date()
     saveDialog.value = false
@@ -405,6 +420,7 @@ async function save() {
       uncertain.value = true
       ElMessage.warning('保存结果待核对，正在读取服务器状态；不会自动重复提交')
     }
+    if (!uncertain.value) showRequestError(e.message || '地图保存失败，请重试', e.requestId)
     await refresh(true)
   } finally {
     busy.value = false
@@ -415,11 +431,15 @@ async function reserve() {
   busy.value = true
   try {
     await request.patch('/enter/reservation', { id: selectedCell.value.id })
-    ElMessage.success('预约成功')
     selected.value = []
-  } catch {
-  } finally {
+    const refreshed = await refresh(true)
+    refreshed
+      ? ElMessage.success('预约成功')
+      : ElMessage.warning('预约成功，状态刷新失败，请刷新地图')
+  } catch (error) {
+    localFailure(error, '预约失败，请重试')
     await refresh(true)
+  } finally {
     busy.value = false
   }
 }
@@ -437,10 +457,14 @@ async function cancel(row) {
   busy.value = true
   try {
     await request.post('/enter/cancelReservation', null, { params: { id: row.id } })
-    ElMessage.success('预约已取消')
-  } catch {
-  } finally {
+    const refreshed = await refresh(true)
+    refreshed
+      ? ElMessage.success('预约已取消')
+      : ElMessage.warning('预约已取消，状态刷新失败，请刷新地图')
+  } catch (error) {
+    localFailure(error, '取消预约失败，请重试')
     await refresh(true)
+  } finally {
     busy.value = false
   }
 }
@@ -496,13 +520,15 @@ watch(
 )
 </script>
 <template>
-  <PageShell
-    :title="admin ? '车位管理' : '车位预约'"
-    :description="
-      admin ? '把空间安排得井然有序。先预览，再一次保存。' : '看清空闲位置，让下一次停车更从容。'
-    "
-  >
+  <PageShell :title="admin ? '车位管理' : '车位预约'">
     <template #actions
+      ><HelpPopover
+        ><p>拖动平移，滚轮或双指缩放；列表可搜索并定位位置。</p>
+        <p v-if="admin">
+          编辑时可框选、连续绘制和批量生成。绿虚线为新增、黄为修改、红为删除；Shift 追加选择。
+        </p>
+        <p v-if="admin">占用位置不可修改，已有位置保留坐标和 ID。草稿确认保存后才生效。</p>
+        <p>页面可见时每 15 秒更新，预约结果以服务器确认为准。</p></HelpPopover
       ><el-button :loading="refreshing" :disabled="busy" @click="current ? refresh() : loadParks()"
         >刷新地图</el-button
       ><el-button
@@ -520,7 +546,6 @@ watch(
       <div class="context-pickers">
         <span class="context-icon">P</span>
         <div>
-          <span class="eyebrow">{{ admin ? 'PARKING WORKSPACE' : 'FIND YOUR SPACE' }}</span>
           <div class="picker-row">
             <el-select
               :model-value="parkId"
@@ -633,16 +658,10 @@ watch(
           />
         </div>
         <p class="update-note">
-          {{
-            updated
-              ? `状态更新于 ${updated.toLocaleTimeString('zh-CN')} · 页面可见时每 15 秒刷新`
-              : '正在获取楼层信息'
-          }}
-          <span v-if="editing"> · 虚线：绿 / 新增　黄 / 修改　红 / 删除</span>
+          {{ updated ? `状态更新于 ${updated.toLocaleTimeString('zh-CN')}` : '正在获取楼层信息' }}
         </p>
       </div>
       <aside class="space-inspector">
-        <span class="eyebrow">{{ editing ? 'SELECTION & PROPERTIES' : 'SPACE DETAILS' }}</span>
         <div class="selection-actions">
           <h2>
             {{
@@ -672,13 +691,7 @@ watch(
             <dd>{{ selectedCell.spaces_row }} 行 · {{ selectedCell.spaces_col }} 列</dd>
           </dl></template
         >
-        <p v-else class="inspector-help">
-          {{
-            editing
-              ? '点击位置查看属性；拖动框选可一次选中多个位置。'
-              : '点击地图上的绿色车位，或在下方列表中搜索并定位。'
-          }}
-        </p>
+
         <template v-if="editing"
           ><el-form v-if="selectedCell" label-position="top"
             ><el-form-item label="位置名称"
@@ -707,10 +720,7 @@ watch(
             @click="removeRows(selected.map((c) => c.id))"
             >删除所选</el-button
           >
-          <p class="inspector-help">
-            预约、在场或关联异常的位置不可修改。已存在的位置保持原坐标和 ID。
-          </p></template
-        >
+        </template>
         <template v-else-if="!admin"
           ><el-button
             class="wide-button reserve-button"
@@ -720,10 +730,7 @@ watch(
             @click="reserve"
             >确认预约</el-button
           >
-          <p class="inspector-help">
-            预约保留时间以成功后的到期时间为准。选择位置不会提前锁定车位。
-          </p></template
-        >
+        </template>
         <template v-else
           ><el-button
             class="wide-button"
@@ -732,10 +739,7 @@ watch(
             @click="startEdit"
             >进入编辑模式</el-button
           >
-          <p class="inspector-help">
-            当前为浏览模式。编辑时可绘制位置、批量生成编号并预览保存。
-          </p></template
-        >
+        </template>
       </aside>
     </div>
     <div v-if="editing" class="save-bar">
@@ -754,7 +758,6 @@ watch(
       <div class="list-heading">
         <div>
           <h2>位置列表</h2>
-          <p>搜索、定位，也支持键盘选择</p>
         </div>
         <div class="list-filters">
           <el-input v-model="filter" placeholder="搜索位置名称" clearable /><el-checkbox
@@ -798,8 +801,7 @@ watch(
         layout="prev,pager,next"
       />
     </section>
-    <el-dialog v-model="generator" title="批量生成车位" width="640px" :close-on-click-modal="false"
-      ><p class="dialog-intro">从指定坐标生成矩形车位区域，不覆盖已有位置。生成结果先进入草稿。</p>
+    <el-dialog v-model="generator" title="批量生成车位" width="640px" :close-on-click-modal="false">
       <el-form label-position="top"
         ><div class="generation-grid">
           <el-form-item label="起始行"
@@ -911,12 +913,6 @@ watch(
   border-radius: 15px;
   flex-shrink: 0;
 }
-.eyebrow {
-  font-size: 10px;
-  letter-spacing: 1.8px;
-  color: #8797ad;
-  font-weight: 700;
-}
 .picker-row {
   display: flex;
   gap: 10px;
@@ -1008,12 +1004,6 @@ dd {
 }
 .reserve-button {
   height: 44px;
-}
-.inspector-help {
-  font-size: 12px;
-  line-height: 1.9;
-  color: #94a3b8;
-  margin-top: 18px;
 }
 .update-note {
   color: #8b9bb0;
@@ -1154,11 +1144,6 @@ dd {
 }
 .generation-grid .el-input-number {
   width: 100%;
-}
-.dialog-intro {
-  font-size: 13px;
-  line-height: 1.8;
-  color: #8494aa;
 }
 .generation-preview {
   padding: 16px;

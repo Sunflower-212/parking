@@ -8,7 +8,7 @@ vi.mock('../src/utils/request', () => ({
 }))
 vi.mock('vue-router', () => ({ onBeforeRouteLeave: vi.fn() }))
 vi.mock('element-plus', () => ({
-  ElMessage: { success: vi.fn(), warning: vi.fn() },
+  ElMessage: vi.fn(),
   ElMessageBox: { confirm: vi.fn() },
 }))
 let wrapper
