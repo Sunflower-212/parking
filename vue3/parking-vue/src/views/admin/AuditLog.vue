@@ -11,6 +11,7 @@ const { rows, total, loading, error, pagination, query, load, reset } = usePaged
   from: null, to: null, actorId: null, action: null, result: null, requestId: null,
 })
 const actions = {
+  'layout.batch': '批量编辑地图',
   'parking.create': '新增停车场', 'parking.update': '修改停车场及归属', 'parking.delete': '删除停车场',
   'layout.add': '新增车位', 'layout.update': '修改地图', 'layout.delete': '删除车位',
   'rule.create': '新增计费规则', 'rule.update': '修改计费规则', 'rule.delete': '删除计费规则',

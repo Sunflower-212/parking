@@ -126,8 +126,15 @@ test('super administrator can search and sees validated user forms', async ({ pa
   expect(errors).toEqual([])
 })
 
-test('super administrator can export filtered users and resume a background task', async ({ page }) => {
-  await login(page, process.env.BOOTSTRAP_ADMIN_USERNAME, process.env.BOOTSTRAP_ADMIN_PASSWORD, true)
+test('super administrator can export filtered users and resume a background task', async ({
+  page,
+}) => {
+  await login(
+    page,
+    process.env.BOOTSTRAP_ADMIN_USERNAME,
+    process.env.BOOTSTRAP_ADMIN_PASSWORD,
+    true,
+  )
   await page.getByRole('link', { name: '用户管理' }).click()
   await page.getByPlaceholder('请输入用户名').fill(user)
   await page.getByRole('button', { name: '搜索', exact: true }).click()
@@ -138,7 +145,8 @@ test('super administrator can export filtered users and resume a background task
     await page.reload()
     const downloadButton = page.getByRole('button', { name: '下载文件（保留24小时）' })
     await expect(downloadButton).toBeVisible({ timeout: 30000 })
-    const downloaded = page.waitForEvent('download'); await downloadButton.click()
+    const downloaded = page.waitForEvent('download')
+    await downloadButton.click()
     expect((await downloaded).suggestedFilename()).toBe('users.csv')
   } else {
     const downloaded = page.waitForEvent('download')
@@ -161,7 +169,10 @@ test.describe('high density canvas interaction', () => {
     await page.mouse.down()
     await page.mouse.move(bounds.x + 220, bounds.y + 210, { steps: 5 })
     await page.mouse.up()
-    const point = { x: 42 + 29 * 1.2, y: 32 + 29 * 1.2 }
+    // List focus gives a known camera center regardless of viewport size and DPR.
+    await page.getByRole('button', { name: '选择', exact: true }).first().click()
+    const point = { x: bounds.width / 2, y: bounds.height / 2 }
+    await page.getByRole('button', { name: '清空选择', exact: true }).click()
     await canvas.click({ position: point })
     await expect(page.locator('.selection-actions strong')).toHaveText('1')
     await canvas.click({ position: point })
@@ -183,7 +194,118 @@ test('ordinary admin is scoped and cannot open platform management', async ({ pa
   expect((await request.get('/api/user/pageList', { headers: tokenHeaders(auth) })).status()).toBe(
     403,
   )
-  expect((await request.get('/api/admin/audit/page', { headers: tokenHeaders(auth) })).status()).toBe(403)
+  expect(
+    (await request.get('/api/admin/audit/page', { headers: tokenHeaders(auth) })).status(),
+  ).toBe(403)
+})
+test('map editor previews, undoes, saves atomically and retains a conflicting draft', async ({
+  page,
+  request,
+}) => {
+  await login(page, admin, admin, true)
+  await page.goto('/admin/spaceManagement')
+  await page.getByRole('combobox', { name: '停车场', exact: true }).press('Enter')
+  await page.getByRole('option', { name: park, exact: true }).click()
+  await expect(page.getByRole('cell', { name: 'A1', exact: true })).toBeVisible()
+  await page.getByRole('button', { name: '编辑地图', exact: true }).click()
+  await page.getByRole('button', { name: '批量生成车位', exact: true }).click()
+  const generator = page.getByRole('dialog', { name: '批量生成车位', exact: true })
+  await generator.getByRole('spinbutton', { name: '起始行', exact: true }).fill('3')
+  await generator.getByRole('button', { name: '生成预览' }).click()
+  await expect(generator.getByText('预览 10 个车位')).toBeVisible()
+  await generator.getByRole('button', { name: '加入草稿' }).click()
+  await expect(page.getByText('10 项待保存')).toBeVisible()
+  await page.getByRole('button', { name: '撤销', exact: true }).click()
+  await expect(page.getByText('0 项待保存')).toBeVisible()
+  await page.getByRole('button', { name: '重做', exact: true }).click()
+  await expect(page.getByText('10 项待保存')).toBeVisible()
+  for (const width of [375, 768, 1440]) {
+    await page.setViewportSize({ width, height: 1000 })
+    await expect
+      .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
+      .toBe(true)
+    await page.screenshot({ path: `../../.work/ui/map-editor-${width}.png`, fullPage: true })
+  }
+  await page.route(
+    '**/api/spaces/layout/batch',
+    (route) => route.fulfill({ json: { code: 1, message: '隔离测试：保存暂时失败' } }),
+    { times: 1 },
+  )
+  await page.getByRole('button', { name: '预览并保存' }).click()
+  await page.getByRole('button', { name: '确认保存', exact: true }).click()
+  await expect(page.getByText('隔离测试：保存暂时失败', { exact: true })).toBeVisible()
+  await expect(page.getByText('10 项待保存')).toBeVisible()
+  await expect(page.getByRole('button', { name: '预览并保存' })).toBeEnabled()
+  let saves = 0
+  page.on('request', (req) => {
+    if (req.url().endsWith('/spaces/layout/batch')) saves++
+  })
+  await page.getByRole('button', { name: '预览并保存' }).click()
+  await page.getByRole('button', { name: '确认保存', exact: true }).click()
+  await expect(page.getByText('地图已整批保存')).toBeVisible()
+  expect(saves).toBe(1)
+  await page.getByRole('button', { name: '编辑地图', exact:true }).click()
+  await page.getByRole('row').filter({has:page.getByRole('cell',{name:'A001',exact:true})}).getByRole('button',{name:'选择',exact:true}).click()
+  async function dragAcrossThree() {
+    await page.locator('canvas').scrollIntoViewIfNeeded()
+    const bounds=await page.locator('canvas').boundingBox()
+    const cellWidth=58*parseInt(await page.locator('.map-controls > span').innerText())/100
+    const center={x:bounds.x+bounds.width/2,y:bounds.y+bounds.height/2}
+    await page.mouse.move(center.x,center.y);await page.mouse.down()
+    await page.mouse.move(center.x+2*cellWidth,center.y,{steps:8});await page.mouse.up()
+  }
+  await page.getByRole('button',{name:/墙体/}).click()
+  await dragAcrossThree()
+  await expect(page.getByText('3 项待保存')).toBeVisible()
+  await page.getByRole('button',{name:'撤销',exact:true}).click()
+  await expect(page.getByText('0 项待保存')).toBeVisible()
+  await page.getByRole('button',{name:/选择 \/ 框选/}).click()
+  await dragAcrossThree()
+  await expect(page.locator('.selection-actions strong')).toHaveText('3')
+  await page.getByRole('button',{name:'退出编辑',exact:true}).click()
+  rootToken = await data(
+    await request.post('/api/admin/login', {
+      form: {
+        username: process.env.BOOTSTRAP_ADMIN_USERNAME,
+        password: process.env.BOOTSTRAP_ADMIN_PASSWORD,
+      },
+    }),
+  )
+  const snapshot = await data(
+    await request.get('/api/spaces/editor', {
+      headers: tokenHeaders(rootToken),
+      params: { park_id: parkId, spaces_storey: 1 },
+    }),
+  )
+  expect(snapshot.items).toHaveLength(11)
+  await page.getByRole('button', { name: '编辑地图', exact: true }).click()
+  await page.getByRole('button', { name: '选择', exact: true }).first().click()
+  await page.getByRole('textbox', { name: '位置名称', exact: true }).fill('我的草稿')
+  await page.getByRole('button', { name: '应用到草稿' }).click()
+  await data(
+    await request.post('/api/spaces/layout/batch', {
+      headers: tokenHeaders(rootToken),
+      data: {
+        parkId,
+        floor: 1,
+        baseRevision: snapshot.revision,
+        creates: [],
+        updates: [{ id: snapshot.items[0].id, name: '其他人修改', type: 0 }],
+        deleteIds: [],
+      },
+    }),
+  )
+  await page.getByRole('button', { name: '预览并保存' }).click()
+  await page.getByRole('button', { name: '确认保存', exact: true }).click()
+  await expect(page.locator('.conflict-alert')).toContainText(/地图已被.*修改/)
+  await expect(page.getByRole('cell', { name: '我的草稿', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: '预览并保存' })).toBeDisabled()
+  await page.getByRole('button', { name: '退出编辑', exact: true }).click()
+  await page.getByRole('button', { name: '继续编辑', exact: true }).click()
+  await expect(page.getByText('1 项待保存')).toBeVisible()
+  await page.getByRole('button', { name: '退出编辑', exact: true }).click()
+  await page.getByRole('button', { name: '放弃草稿', exact: true }).click()
+  await expect(page.getByRole('cell', { name: '其他人修改', exact: true })).toBeVisible()
 })
 test('user reserves once, cancels, and sees responsive pages and current account', async ({
   page,

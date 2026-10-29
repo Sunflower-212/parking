@@ -1,263 +1,592 @@
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
-import { CELL, cellAt, coordinateKey } from '@/utils/map-geometry'
+import { CELL, cellAt, coordinateKey, zoomAt, fitView, rectangleCells } from '@/utils/map-geometry'
 const props = defineProps({
   spaces: { type: Array, default: () => [] },
   modelValue: { type: Array, default: () => [] },
   multiple: Boolean,
   disabled: Boolean,
+  editing: Boolean,
+  tool: { type: String, default: 'select' },
+  contextKey: String,
 })
-const emit = defineEmits(['update:modelValue'])
+const emit = defineEmits(['update:modelValue', 'stroke'])
 const canvas = ref(),
   holder = ref(),
+  panel = ref(),
   scale = ref(1),
-  offset = ref({ x: 22, y: 22 }),
+  offset = ref({ x: 24, y: 24 }),
   width = ref(800),
-  height = 420
-let observer,
-  frame,
-  down,
-  dragged = false
-// 按行列建立坐标索引，绘制和点击直接定位单元格，避免每次扫描整层车位数组。
+  height = ref(480),
+  box = ref(null),
+  fullscreen = ref(false)
 const index = computed(
   () => new Map(props.spaces.map((s) => [coordinateKey(s.spaces_row, s.spaces_col), s])),
 )
 const selected = computed(() => new Set(props.modelValue.map((s) => s.id)))
-const colors = {
-  0: ['#ecfdf5', '#059669'],
-  1: ['#fff1f2', '#dc4545'],
-  2: ['#f1f5f9', '#94a3b8'],
-  3: ['#334155', '#94a3b8'],
-  4: ['#eff6ff', '#2563eb'],
+const legend = [
+  ['#10b981', '空闲'],
+  ['#94a3b8', '不可用'],
+  ['#2563eb', '已选择'],
+  ['#cbd5e1', '道路'],
+  ['#475569', '墙体'],
+  ['#3b82f6', '出入口'],
+]
+let observer,
+  frame,
+  first = true,
+  gesture,
+  pointers = new Map(),
+  pinch,
+  stroke = new Map()
+function schedule() {
+  if (!frame)
+    frame = requestAnimationFrame(() => {
+      frame = null
+      draw()
+    })
 }
 function draw() {
   const el = canvas.value
   if (!el) return
-  // 以受限设备像素比提升清晰度；交互坐标始终使用 CSS 像素，不重复乘设备像素比。
-  const dpr = Math.min(devicePixelRatio || 1, 2)
-  el.width = width.value * dpr
-  el.height = height * dpr
+  const dpr = Math.min(window.devicePixelRatio || 1, 2)
+  if (el.width !== Math.round(width.value * dpr) || el.height !== Math.round(height.value * dpr)) {
+    el.width = Math.round(width.value * dpr)
+    el.height = Math.round(height.value * dpr)
+  }
   const ctx = el.getContext('2d')
-  ctx.scale(dpr, dpr)
-  ctx.fillStyle = '#f8fafc'
-  ctx.fillRect(0, 0, width.value, height)
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+  ctx.fillStyle = '#f3f6fa'
+  ctx.fillRect(0, 0, width.value, height.value)
   ctx.save()
   ctx.translate(offset.value.x, offset.value.y)
   ctx.scale(scale.value, scale.value)
-  // 反算可视范围，只遍历屏幕附近单元格，缩放和拖动时不绘制整张地图。
-  const minCol = Math.max(1, Math.floor(-offset.value.x / (CELL * scale.value))),
-    maxCol = Math.ceil((width.value - offset.value.x) / (CELL * scale.value)) + 1,
-    minRow = Math.max(1, Math.floor(-offset.value.y / (CELL * scale.value))),
-    maxRow = Math.ceil((height - offset.value.y) / (CELL * scale.value)) + 1
+  const minCol = Math.max(1, Math.floor(-offset.value.x / (CELL * scale.value)) + 1),
+    maxCol = Math.min(100, Math.ceil((width.value - offset.value.x) / (CELL * scale.value)))
+  const minRow = Math.max(1, Math.floor(-offset.value.y / (CELL * scale.value)) + 1),
+    maxRow = Math.min(100, Math.ceil((height.value - offset.value.y) / (CELL * scale.value)))
+  if (props.editing && scale.value * CELL > 12) {
+    ctx.strokeStyle = '#e0e7ef'
+    ctx.lineWidth = 1 / scale.value
+    ctx.beginPath()
+    for (let c = minCol; c <= maxCol + 1; c++) {
+      ctx.moveTo((c - 1) * CELL, (minRow - 1) * CELL)
+      ctx.lineTo((c - 1) * CELL, maxRow * CELL)
+    }
+    for (let r = minRow; r <= maxRow + 1; r++) {
+      ctx.moveTo((minCol - 1) * CELL, (r - 1) * CELL)
+      ctx.lineTo(maxCol * CELL, (r - 1) * CELL)
+    }
+    ctx.stroke()
+  }
   for (let row = minRow; row <= maxRow; row++)
     for (let col = minCol; col <= maxCol; col++) {
       const s = index.value.get(coordinateKey(row, col))
       if (!s) continue
       const x = (col - 1) * CELL,
-        y = (row - 1) * CELL
-      const [bg, fg] = colors[s.spaces_flag] || colors[2]
-      ctx.fillStyle = bg
-      ctx.strokeStyle = selected.value.has(s.id) ? '#2563eb' : '#dce5ee'
-      ctx.lineWidth = selected.value.has(s.id) ? 2.5 : 1
-      ctx.beginPath()
-      ctx.roundRect(x + 3, y + 3, CELL - 6, CELL - 6, 7)
-      ctx.fill()
-      ctx.stroke()
-      ctx.fillStyle = fg
-      ctx.textAlign = 'center'
-      ctx.font = '600 13px sans-serif'
-      ctx.fillText(
-        s.spaces_flag === 4
-          ? '出入口'
-          : s.spaces_flag === 3
-            ? '墙'
-            : s.spaces_flag === 2
-              ? '·'
-              : s.spaces_name,
-        x + CELL / 2,
-        y + CELL / 2 + 4,
-      )
+        y = (row - 1) * CELL,
+        chosen = selected.value.has(s.id),
+        flag = s.spaces_flag,
+        labels = scale.value * CELL >= 26
+      ctx.globalAlpha = s._deleted ? 0.35 : 1
+      ctx.setLineDash([])
+      if (flag < 2) {
+        ctx.fillStyle = chosen ? '#dbeafe' : flag === 0 ? '#e7f7f0' : '#e3e8ef'
+        ctx.fillRect(x + 7, y + 4, CELL - 14, CELL - 8)
+        ctx.strokeStyle = chosen ? '#2563eb' : flag === 0 ? '#34ad86' : '#a5b1c2'
+        ctx.lineWidth = chosen ? 2.5 : 1.5
+        ctx.beginPath()
+        ctx.moveTo(x + 7, y + 9)
+        ctx.lineTo(x + 7, y + CELL - 5)
+        ctx.lineTo(x + CELL - 7, y + CELL - 5)
+        ctx.lineTo(x + CELL - 7, y + 9)
+        ctx.stroke()
+        if (flag === 1) {
+          ctx.fillStyle = '#b5c0ce'
+          ctx.beginPath()
+          ctx.roundRect(x + 20, y + 9, 18, 27, 5)
+          ctx.fill()
+        }
+      } else if (flag === 2) {
+        ctx.fillStyle = '#dfe7f0'
+        ctx.fillRect(x, y, CELL, CELL)
+        const horizontal = [col - 1, col + 1].some(
+          (c) => index.value.get(coordinateKey(row, c))?.spaces_flag === 2,
+        )
+        ctx.strokeStyle = '#fff'
+        ctx.lineWidth = 1.5
+        ctx.setLineDash([7, 7])
+        ctx.beginPath()
+        if (horizontal) {
+          ctx.moveTo(x, y + CELL / 2)
+          ctx.lineTo(x + CELL, y + CELL / 2)
+        } else {
+          ctx.moveTo(x + CELL / 2, y)
+          ctx.lineTo(x + CELL / 2, y + CELL)
+        }
+        ctx.stroke()
+        ctx.setLineDash([])
+      } else if (flag === 3) {
+        ctx.fillStyle = '#475569'
+        const horizontal = [col - 1, col + 1].some(
+          (c) => index.value.get(coordinateKey(row, c))?.spaces_flag === 3,
+        )
+        ctx.fillRect(
+          x + (horizontal ? 0 : 20),
+          y + (horizontal ? 20 : 0),
+          horizontal ? CELL : 18,
+          horizontal ? 18 : CELL,
+        )
+      } else {
+        ctx.fillStyle = '#e0ecff'
+        ctx.fillRect(x + 2, y + 2, CELL - 4, CELL - 4)
+        ctx.fillStyle = '#2563eb'
+        ctx.font = 'bold 22px sans-serif'
+        ctx.textAlign = 'center'
+        if (labels) ctx.fillText('↔', x + CELL / 2, y + 28)
+      }
+      if (chosen && flag >= 2) {
+        ctx.strokeStyle = '#2563eb'
+        ctx.lineWidth = 2
+        ctx.strokeRect(x + 2, y + 2, CELL - 4, CELL - 4)
+      }
+      if (labels && (flag < 2 || flag === 4)) {
+        ctx.fillStyle = chosen ? '#1d4ed8' : flag === 0 ? '#15795f' : '#53647c'
+        ctx.font = '600 10px sans-serif'
+        ctx.textAlign = 'center'
+        ctx.fillText(flag === 4 ? '出入口' : s.spaces_name, x + CELL / 2, y + 47, CELL - 12)
+      }
+      if (s._change || s._deleted) {
+        ctx.strokeStyle = s._deleted ? '#ef4444' : s._change === 'new' ? '#10b981' : '#f59e0b'
+        ctx.lineWidth = 2
+        ctx.setLineDash([4, 3])
+        ctx.strokeRect(x + 1, y + 1, CELL - 2, CELL - 2)
+        ctx.setLineDash([])
+      }
+      ctx.globalAlpha = 1
     }
+  if (box.value) {
+    const { a, b } = box.value
+    const x = (Math.min(a.col, b.col) - 1) * CELL,
+      y = (Math.min(a.row, b.row) - 1) * CELL
+    ctx.fillStyle = '#2563eb20'
+    ctx.strokeStyle = '#2563eb'
+    ctx.lineWidth = 1 / scale.value
+    ctx.fillRect(x, y, (Math.abs(a.col - b.col) + 1) * CELL, (Math.abs(a.row - b.row) + 1) * CELL)
+    ctx.strokeRect(x, y, (Math.abs(a.col - b.col) + 1) * CELL, (Math.abs(a.row - b.row) + 1) * CELL)
+  }
+  if (props.editing && stroke.size) {
+    ctx.fillStyle = '#2563eb45'
+    for (const c of stroke.values())
+      ctx.fillRect((c.col - 1) * CELL + 2, (c.row - 1) * CELL + 2, CELL - 4, CELL - 4)
+  }
   ctx.restore()
 }
-// 同一帧中的多次状态变化合并为一次绘制，避免指针移动触发重复渲染。
-function schedule() {
-  cancelAnimationFrame(frame)
-  frame = requestAnimationFrame(draw)
+function local(e) {
+  const r = canvas.value.getBoundingClientRect()
+  return { x: e.clientX - r.left, y: e.clientY - r.top }
 }
-function zoom(delta) {
-  scale.value = Math.min(2, Math.max(0.35, +(scale.value + delta).toFixed(2)))
+function cell(e) {
+  return cellAt(
+    e.clientX,
+    e.clientY,
+    canvas.value.getBoundingClientRect(),
+    offset.value,
+    scale.value,
+  )
+}
+function zoom(delta, anchor = { x: width.value / 2, y: height.value / 2 }) {
+  autoFit = false
+  const next = Math.max(0.02, Math.min(3, scale.value * delta))
+  offset.value = zoomAt(anchor, offset.value, scale.value, next)
+  scale.value = next
   schedule()
 }
-function pointerDown(e) {
-  if (e.button !== 0) return
-  down = { x: e.clientX, y: e.clientY, ox: offset.value.x, oy: offset.value.y }
-  dragged = false
-  canvas.value.setPointerCapture(e.pointerId)
+function fit() {
+  autoFit = true
+  const view = fitView(props.spaces, width.value, height.value)
+  scale.value = view.scale
+  offset.value = view.offset
+  schedule()
 }
-function pointerMove(e) {
-  if (!down) return
-  const dx = e.clientX - down.x,
-    dy = e.clientY - down.y
-  // 超过拖动阈值后不再当作单击选择，避免平移地图时误选车位。
-  if (Math.abs(dx) + Math.abs(dy) > 4) dragged = true
-  if (dragged) {
-    offset.value = { x: down.ox + dx, y: down.oy + dy }
+function focus(s) {
+  autoFit = false
+  scale.value = Math.max(0.8, scale.value)
+  offset.value = {
+    x: width.value / 2 - (s.spaces_col - 0.5) * CELL * scale.value,
+    y: height.value / 2 - (s.spaces_row - 0.5) * CELL * scale.value,
+  }
+  schedule()
+}
+function addStroke(a, b) {
+  const steps = Math.max(Math.abs(b.row - a.row), Math.abs(b.col - a.col), 1)
+  for (let i = 0; i <= steps; i++) {
+    const row = Math.round(a.row + ((b.row - a.row) * i) / steps),
+      col = Math.round(a.col + ((b.col - a.col) * i) / steps)
+    if (row >= 1 && row <= 100 && col >= 1 && col <= 100) stroke.set(`${row}:${col}`, { row, col })
+  }
+}
+function down(e) {
+  if (e.button !== 0) return
+  canvas.value.setPointerCapture(e.pointerId)
+  pointers.set(e.pointerId, local(e))
+  if (pointers.size === 2) {
+    const [a, b] = [...pointers.values()]
+    pinch = {
+      distance: Math.hypot(a.x - b.x, a.y - b.y),
+      center: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 },
+    }
+    gesture = null
+    stroke.clear()
+    box.value = null
+    schedule()
+    return
+  }
+  const point = cell(e)
+  gesture = {
+    start: local(e),
+    origin: { ...offset.value },
+    cell: point,
+    last: point,
+    moved: false,
+    add: e.shiftKey || e.ctrlKey || e.metaKey,
+  }
+  if (props.editing && !props.disabled && !['select', 'pan'].includes(props.tool)) {
+    stroke.clear()
+    addStroke(point, point)
     schedule()
   }
 }
-function pointerUp(e) {
-  if (!down) return
-  if (!dragged && !props.disabled) {
-    // 将屏幕点击逆变换为地图行列，保持平移、缩放后的命中位置与实际绘制一致。
-    const point = cellAt(
-      e.clientX,
-      e.clientY,
-      canvas.value.getBoundingClientRect(),
-      offset.value,
-      scale.value,
-    )
-    const space = index.value.get(coordinateKey(point.row, point.col))
-    if (space && (props.multiple || space.spaces_flag === 0)) {
-      const exists = selected.value.has(space.id)
+function move(e) {
+  if (!pointers.has(e.pointerId)) return
+  pointers.set(e.pointerId, local(e))
+  if (pinch && pointers.size === 2) {
+    const [a, b] = [...pointers.values()],
+      distance = Math.hypot(a.x - b.x, a.y - b.y),
+      center = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }
+    if (pinch.distance > 0) {
+      zoom(distance / pinch.distance, pinch.center)
+      offset.value = {
+        x: offset.value.x + center.x - pinch.center.x,
+        y: offset.value.y + center.y - pinch.center.y,
+      }
+    }
+    pinch = { distance, center }
+    schedule()
+    return
+  }
+  if (!gesture) return
+  const p = local(e),
+    c = cell(e),
+    dx = p.x - gesture.start.x,
+    dy = p.y - gesture.start.y
+  if (Math.hypot(dx, dy) > 4) gesture.moved = true
+  if (props.editing && !props.disabled && props.tool === 'select') {
+    box.value = { a: gesture.cell, b: c }
+    schedule()
+  } else if (props.editing && !props.disabled && props.tool !== 'pan') {
+    addStroke(gesture.last, c)
+    gesture.last = c
+    schedule()
+  } else if (gesture.moved) {
+    autoFit = false
+    offset.value = { x: gesture.origin.x + dx, y: gesture.origin.y + dy }
+    schedule()
+  }
+}
+function up(e) {
+  pointers.delete(e.pointerId)
+  if (pinch) {
+    if (pointers.size === 0) pinch = null
+    gesture = null
+    return
+  }
+  if (!gesture) return
+  if (!props.disabled) {
+    if (props.editing && !['select', 'pan'].includes(props.tool))
+      emit('stroke', { tool: props.tool, cells: [...stroke.values()] })
+    else if (props.editing && props.tool === 'select' && gesture.moved) {
+      const ids = new Set(
+        rectangleCells(gesture.cell, cell(e)).map((p) => coordinateKey(p.row, p.col)),
+      )
+      const found = props.spaces.filter(
+        (s) => !s._deleted && ids.has(coordinateKey(s.spaces_row, s.spaces_col)),
+      )
       emit(
         'update:modelValue',
-        props.multiple
-          ? exists
-            ? props.modelValue.filter((s) => s.id !== space.id)
-            : [...props.modelValue, space]
-          : exists
-            ? []
-            : [space],
+        gesture.add
+          ? [...new Map([...props.modelValue, ...found].map((s) => [s.id, s])).values()]
+          : found,
       )
+    } else if (!gesture.moved && (!props.editing || props.tool === 'select')) {
+      const p = cell(e),
+        s = index.value.get(coordinateKey(p.row, p.col))
+      if (s && !s._deleted) {
+        const exists = selected.value.has(s.id)
+        emit(
+          'update:modelValue',
+          props.multiple
+            ? exists
+              ? props.modelValue.filter((v) => v.id !== s.id)
+              : [...props.modelValue, s]
+            : exists
+              ? []
+              : [s],
+        )
+      } else emit('update:modelValue', [])
     }
   }
-  down = null
-}
-function reset() {
-  offset.value = { x: 22, y: 22 }
-  scale.value = 1
+  gesture = null
+  stroke.clear()
+  box.value = null
   schedule()
 }
-watch(() => props.spaces, schedule, { deep: false })
-watch(() => props.modelValue, schedule, { deep: false })
+function cancelPointer() {
+  pointers.clear()
+  pinch = null
+  gesture = null
+  stroke.clear()
+  box.value = null
+  schedule()
+}
+async function toggleFullscreen() {
+  try {
+    if (document.fullscreenElement === panel.value) await document.exitFullscreen()
+    else await panel.value.requestFullscreen()
+  } catch {
+    fullscreen.value = !fullscreen.value
+    schedule()
+  }
+}
+function fullChanged() {
+  fullscreen.value = document.fullscreenElement === panel.value
+}
+watch(
+  () => props.spaces,
+  () => {
+    if (first && props.spaces.length) {
+      first = false
+      fit()
+    } else schedule()
+  },
+)
+watch(() => props.modelValue, schedule)
+watch(
+  () => props.contextKey,
+  () => {
+    first = true
+    cancelPointer()
+    fit()
+  },
+)
+watch(() => props.editing, schedule)
+let autoFit = true
 onMounted(() => {
   observer = new ResizeObserver((entries) => {
+    const oldWidth = width.value,
+      oldHeight = height.value
     width.value = Math.max(1, entries[0].contentRect.width)
-    schedule()
+    height.value = Math.max(240, entries[0].contentRect.height)
+    if (first || autoFit) fit()
+    else {
+      offset.value = {
+        x: offset.value.x + (width.value - oldWidth) / 2,
+        y: offset.value.y + (height.value - oldHeight) / 2,
+      }
+      schedule()
+    }
   })
   observer.observe(holder.value)
+  document.addEventListener('fullscreenchange', fullChanged)
+  schedule()
 })
 onBeforeUnmount(() => {
   observer?.disconnect()
   cancelAnimationFrame(frame)
+  document.removeEventListener('fullscreenchange', fullChanged)
 })
+defineExpose({ fit, focus })
 </script>
 <template>
-  <div class="map-panel">
-    <div class="map-toolbar">
+  <section ref="panel" class="parking-map" :class="{ 'map-full': fullscreen }">
+    <div class="map-top">
       <div class="map-legend">
-        <span v-for="(color, key) in colors" :key="key"
-          ><i :style="{ background: color[1] }" />{{
-            ['空闲', '占用', '道路', '墙体', '出入口'][key]
-          }}</span
+        <span v-for="[color, label] in legend" :key="label"
+          ><i :style="{ background: color }" />{{ label }}</span
         >
       </div>
-      <div>
-        <el-button size="small" aria-label="缩小地图" @click="zoom(-0.1)">−</el-button
-        ><span class="zoom-label">{{ Math.round(scale * 100) }}%</span
-        ><el-button size="small" aria-label="放大地图" @click="zoom(0.1)">＋</el-button
-        ><el-button size="small" @click="reset">复位</el-button>
-      </div>
+      <el-button size="small" @click="toggleFullscreen">{{
+        fullscreen ? '退出全屏' : '全屏地图'
+      }}</el-button>
     </div>
     <div ref="holder" class="map-viewport">
       <canvas
         ref="canvas"
-        :style="{ width: '100%', height: height + 'px' }"
-        aria-label="停车场车位地图，拖动可移动视图；也可使用下方列表选择车位"
+        :style="{
+          width: '100%',
+          height: '100%',
+          cursor: editing && tool !== 'pan' ? 'crosshair' : 'grab',
+        }"
         role="img"
-        @pointerdown="pointerDown"
-        @pointermove="pointerMove"
-        @pointerup="pointerUp"
-        @pointercancel="down = null"
-        @wheel.prevent="zoom($event.deltaY > 0 ? -0.05 : 0.05)"
+        aria-label="停车场二维地图，可拖动缩放，也可使用位置列表进行键盘操作"
+        @pointerdown="down"
+        @pointermove="move"
+        @pointerup="up"
+        @pointercancel="cancelPointer"
+        @wheel.prevent="zoom($event.deltaY > 0 ? 0.9 : 1.1, local($event))"
       />
-      <div v-if="!spaces.length" class="map-empty">当前楼层暂无车位</div>
+      <div v-if="!spaces.length" class="map-empty">
+        <strong>{{ editing ? '从第一个车位开始' : '这一层还没有位置' }}</strong
+        ><span>{{
+          editing ? '选择左侧工具，在网格上绘制，或使用批量生成' : '切换楼层，或等待管理员配置地图'
+        }}</span>
+      </div>
+      <div class="map-controls">
+        <el-button aria-label="缩小地图" @click="zoom(0.8)">−</el-button
+        ><span>{{ Math.round(scale * 100) }}%</span
+        ><el-button aria-label="放大地图" @click="zoom(1.25)">＋</el-button
+        ><el-button @click="fit">适配全图</el-button>
+      </div>
     </div>
-    <p class="map-hint">
-      拖动地图平移，滚轮缩放。{{
-        multiple
-          ? '支持选择多个位置，已预约或在场车位不能编辑或删除。'
-          : '选择绿色空闲车位后预约，最终结果以服务端确认为准。'
-      }}
-    </p>
-  </div>
+    <div class="map-foot">
+      <span
+        ><i class="live-dot" />
+        {{ editing ? '编辑预览 · 尚未影响正式地图' : '实时状态 · 以服务器确认为准' }}</span
+      ><span>{{ editing ? '框选多个位置 · Shift 追加选择' : '拖动平移 · 滚轮或双指缩放' }}</span>
+    </div>
+  </section>
 </template>
 <style scoped>
-.map-panel {
-  border: 1px solid #e8edf4;
-  border-radius: 12px;
+.parking-map {
+  background: #fff;
+  border: 1px solid #e1e8f1;
+  border-radius: 18px;
   overflow: hidden;
-  background: white;
+  min-width: 0;
 }
-.map-toolbar {
+.map-top {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 16px;
-  flex-wrap: wrap;
+  padding: 16px 20px;
 }
 .map-legend {
   display: flex;
-  gap: 14px;
-  font-size: 12px;
-  color: #778398;
   flex-wrap: wrap;
+  gap: 12px;
+  font-size: 12px;
+  color: #64748b;
 }
 .map-legend span {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
 }
 .map-legend i {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
+  width: 8px;
+  height: 8px;
+  border-radius: 3px;
 }
 .map-viewport {
-  width: 100%;
   position: relative;
+  height: clamp(400px, 60vh, 640px);
   overflow: hidden;
   touch-action: none;
 }
 .map-viewport canvas {
   display: block;
-  cursor: grab;
 }
-.map-viewport canvas:active {
-  cursor: grabbing;
+.map-controls {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  display: flex;
+  align-items: center;
+  background: #ffffffed;
+  padding: 6px;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  box-shadow: 0 4px 20px #263b5720;
+}
+.map-controls span {
+  width: 44px;
+  text-align: center;
+  font-size: 12px;
+  color: #64748b;
+}
+.map-controls .el-button {
+  margin-left: 0;
+  border: 0;
+}
+.map-foot {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 14px 20px;
+  color: #8291a5;
+  font-size: 12px;
+}
+.live-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  background: #10b981;
+  border-radius: 50%;
+  margin-right: 6px;
 }
 .map-empty {
   position: absolute;
-  top: 45%;
-  width: 100%;
+  top: 38%;
+  left: 5%;
+  width: 90%;
   text-align: center;
-  color: #94a3b8;
   pointer-events: none;
+  color: #8394aa;
+  display: grid;
+  gap: 10px;
 }
-.map-hint {
-  padding: 14px 18px;
-  margin: 0;
-  color: #94a3b8;
-  font-size: 12px;
-  line-height: 1.7;
+.map-empty strong {
+  font-size: 20px;
+  color: #455a76;
 }
-.zoom-label {
-  display: inline-block;
-  width: 50px;
-  text-align: center;
-  color: #778398;
-  font-size: 12px;
+.map-empty span {
+  font-size: 13px;
+}
+.parking-map:fullscreen,
+.map-full {
+  border-radius: 0;
+  background: #fff;
+}
+.parking-map:fullscreen .map-viewport {
+  height: calc(100vh - 140px);
+}
+.map-full:not(:fullscreen) {
+  position: fixed;
+  inset: 0;
+  z-index: 2100;
+}
+.map-full:not(:fullscreen) .map-viewport {
+  height: calc(100dvh - 150px);
+}
+@media (max-width: 600px) {
+  .map-top {
+    padding: 12px;
+  }
+  .map-legend {
+    gap: 8px;
+    font-size: 11px;
+  }
+  .map-viewport {
+    height: 420px;
+  }
+  .map-foot {
+    padding: 12px;
+  }
+  .map-controls {
+    right: 10px;
+    bottom: 10px;
+  }
 }
 </style>

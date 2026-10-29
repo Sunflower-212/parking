@@ -10,6 +10,10 @@ import org.zjmproject.pojo.Result;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+    @ExceptionHandler(org.zjmproject.service.LayoutEditorService.Conflict.class)
+    public ResponseEntity<Result<?>> layoutConflict(org.zjmproject.service.LayoutEditorService.Conflict e) {
+        return ResponseEntity.status(409).body(new Result<>(1,e.getMessage(),java.util.Map.of("reason",e.reason,"revision",e.revision,"conflictIds",e.ids)));
+    }
     private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
     @ExceptionHandler(org.zjmproject.service.ParkingAdmission.Busy.class)

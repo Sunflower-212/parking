@@ -80,6 +80,7 @@ public class AuditService {
         bestEffort(action,ids,actor,role,result,"SUCCESS".equals(result)?null:"REQUEST_REJECTED");
     }
     private static final Map<String,String> REQUEST_ACTIONS=Map.ofEntries(
+        Map.entry("/spaces/layout/batch","layout.batch"),
         Map.entry("/admin/login","admin.login"),Map.entry("/admin/logout","admin.logout"),
         Map.entry("/admin/register","admin.create"),Map.entry("/admin/addAdmin","admin.create"),
         Map.entry("/admin/delete","admin.delete"),Map.entry("/admin/resetPassword","admin.password_reset"),Map.entry("/admin/updatePassword","admin.password_change"),
