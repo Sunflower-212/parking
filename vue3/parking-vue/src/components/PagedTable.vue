@@ -1,5 +1,6 @@
 <script setup>
 defineProps({
+  rowKey: { type: String, default: 'id' },
   rows: { type: Array, default: () => [] },
   total: Number,
   loading: Boolean,
@@ -18,7 +19,7 @@ defineEmits(['reload', 'page', 'size'])
         :data="rows"
         v-loading="loading"
         stripe
-        row-key="id"
+        :row-key="rowKey"
         style="width: 100%"
         empty-text="暂无符合条件的记录"
         ><slot

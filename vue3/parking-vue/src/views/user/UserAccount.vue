@@ -43,6 +43,7 @@ async function membership() {
       new URLSearchParams({ days: days.value }),
     )
     ElMessage.success('会员信息已更新')
+    // 会员变更成功后重新获取服务端账户信息，避免余额或会员标签继续显示旧状态。
     await refresh()
   } catch {
   } finally {

@@ -49,6 +49,10 @@ mybatis:
     default-statement-timeout: 5
   mapper-locations: classpath:org/zjmproject/mapper/*.xml
 parking:
+  logging:
+    requests-enabled: ${REQUEST_LOG_ENABLED:true}
+    slow-request-ms: ${SLOW_REQUEST_MS:500}
+    read-sample: ${READ_LOG_SAMPLE:0.1}
   capacity-buckets: ${CAPACITY_BUCKETS:16}
   background:
     enabled: ${BACKGROUND_TASKS_ENABLED:false}

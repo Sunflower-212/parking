@@ -25,6 +25,9 @@ public class ChatController {
     @GetMapping(value="/chat",produces="text/plain;charset=UTF-8")
     public Flux<String> chat(@RequestParam String message,@RequestParam String chatId) {
         final int actorId=AccessGuard.userId();
+        final String requestId=org.zjmproject.observability.RuntimeEvents.requestId();
+        final long started=System.nanoTime();
+        final var timedOut=new java.util.concurrent.atomic.AtomicBoolean();
         if(chatId.isBlank() || chatId.length()>100 || message.isBlank() || message.length()>8000) throw new IllegalArgumentException("会话ID或消息长度无效");
         db.update("insert into historicalSession(chatId,type,userId,create_time,update_time) values(?,'chat',?,now(),now()) on duplicate key update chatId=chatId",chatId,Integer.toString(actorId));
         if(db.queryForObject("select count(*) from historicalSession where chatId=? and userId=?",Integer.class,chatId,Integer.toString(actorId))!=1) throw new IllegalArgumentException("无权访问此会话");
@@ -37,9 +40,18 @@ public class ChatController {
             })
             .function("spaceFunction","查询停车场车位",SpaceFunction.SpaceRequest.class,spaces::findSpacesByParking)
             .function("reservationSpaceFunction","为当前登录用户预约指定空闲车位",ReservationSpaceFunction.ReservationSpaceRequest.class,request->{
+                // 工具回调可能换线程，显式恢复来源请求，确保预约事件仍可追溯。
+                try(var context=org.zjmproject.observability.RuntimeEvents.scope(requestId)) {
                 var space=spaces.findSpacesByInfo(request.getParkingName(),request.getSpaces_row(),request.getSpaces_col(),request.getSpaces_storey());
                 if(space==null) throw new IllegalArgumentException("车位不存在");
                 return flow.reserve(actorId,space.getId());
-            }).stream().content().timeout(java.time.Duration.ofSeconds(60));
+                }
+            }).stream().content().timeout(java.time.Duration.ofSeconds(60))
+            .doOnError(e->timedOut.set(e instanceof java.util.concurrent.TimeoutException))
+            .doFinally(signal->{try(var context=org.zjmproject.observability.RuntimeEvents.scope(requestId)){
+                org.slf4j.LoggerFactory.getLogger(ChatController.class).atInfo().addKeyValue("event","ai.stream")
+                    .addKeyValue("actorId",actorId).addKeyValue("elapsedMs",(System.nanoTime()-started)/1_000_000)
+                    .addKeyValue("result",timedOut.get()?"TIMEOUT":signal==reactor.core.publisher.SignalType.CANCEL?"CANCELLED":signal==reactor.core.publisher.SignalType.ON_ERROR?"ERROR":"SUCCESS").log("stream_finished");
+            }});
     }
 }

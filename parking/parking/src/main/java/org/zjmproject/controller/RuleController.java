@@ -21,6 +21,7 @@ import java.util.Objects;
 @RequestMapping("/rule")
 @Validated
 public class RuleController {
+    @Autowired private org.zjmproject.service.AuditService audits;
     @Autowired private org.zjmproject.mapper.RuleMapper mapper;
     @GetMapping("/pageList") public Result<?> pageList(@RequestParam(defaultValue="1") Integer pageNum,@RequestParam(defaultValue="20") Integer pageSize,@RequestParam(required=false) String rule_name){
         org.zjmproject.utils.PageQuery.start(pageNum,pageSize);
@@ -41,6 +42,7 @@ public class RuleController {
             return Result.error("非管理员不能创建计费规则");
         }
         ruleService.createRule(rule);
+        audits.success("rule.create",List.of(ruleService.findRuleByRuleName(rule.getRule_name()).getId()));
         return Result.success();
     }
 
@@ -69,6 +71,7 @@ public class RuleController {
         }
 
         ruleService.deleteRule(id);
+        audits.success("rule.delete",List.of(id));
         return Result.success();
     }
 
@@ -90,6 +93,7 @@ public class RuleController {
             return  Result.error("该规则名称已被占用");
         }
         ruleService.updateRule(rule);
+        audits.success("rule.update",List.of(rule.getId()));
         return Result.success();
     }
 }

@@ -10,7 +10,7 @@ FROM eclipse-temurin:17.0.14_7-jre-jammy
 RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/* && useradd --create-home --uid 10001 parking
 WORKDIR /app
 COPY --from=build /build/target/parking-1.0-SNAPSHOT.jar app.jar
-RUN mkdir uploads exports && chown parking:parking uploads exports
+RUN mkdir uploads exports logs && chown parking:parking uploads exports logs
 USER parking
 ENV SPRING_CONFIG_NAME=application-example TZ=Asia/Shanghai
 EXPOSE 8080

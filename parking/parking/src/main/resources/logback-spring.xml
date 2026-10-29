@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+  <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
+  <property name="CONSOLE_LOG_STRUCTURED_FORMAT" value="ecs"/>
+  <property name="FILE_LOG_STRUCTURED_FORMAT" value="ecs"/>
+  <property name="LOG_FILE" value="${PARKING_LOG_DIR:-./logs}/parking.json.log"/>
+  <property name="LOGBACK_ROLLINGPOLICY_MAX_FILE_SIZE" value="${LOG_MAX_FILE_SIZE:-25MB}"/>
+  <property name="LOGBACK_ROLLINGPOLICY_MAX_HISTORY" value="${LOG_HISTORY_DAYS:-14}"/>
+  <property name="LOGBACK_ROLLINGPOLICY_TOTAL_SIZE_CAP" value="${LOG_TOTAL_SIZE_CAP:-1GB}"/>
+  <property name="LOGBACK_ROLLINGPOLICY_CLEAN_HISTORY_ON_START" value="true"/>
+  <include resource="org/springframework/boot/logging/logback/structured-console-appender.xml"/>
+  <include resource="org/springframework/boot/logging/logback/structured-file-appender.xml"/>
+  <logger name="org.zjmproject.observability" level="${BUSINESS_LOG_LEVEL:-INFO}"/>
+  <logger name="org.zjmproject.mapper" level="WARN"/>
+  <logger name="org.springframework.jdbc" level="WARN"/>
+  <logger name="org.springframework.ai" level="WARN"/>
+  <!-- DEBUG/TRACE transport logs can expose response tokens or Redis command arguments. -->
+  <logger name="org.springframework.web" level="WARN"/>
+  <logger name="io.lettuce.core" level="WARN"/>
+  <logger name="org.redisson" level="WARN"/>
+  <logger name="org.springframework.amqp" level="WARN"/>
+  <logger name="com.rabbitmq" level="WARN"/>
+  <logger name="org.apache.http" level="WARN"/>
+  <root level="${APP_LOG_LEVEL:-INFO}"><appender-ref ref="CONSOLE"/><appender-ref ref="FILE"/></root>
+</configuration>

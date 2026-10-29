@@ -172,6 +172,9 @@ test('ordinary admin is scoped and cannot open platform management', async ({ pa
   await login(page, admin, admin, true)
   await expect(page.getByRole('link', { name: '用户管理' })).toHaveCount(0)
   await expect(page.getByRole('link', { name: '充值管理' })).toHaveCount(0)
+  await expect(page.getByRole('link', { name: '操作日志' })).toHaveCount(0)
+  await page.goto('/admin/auditLogs')
+  await expect(page).toHaveURL(/\/admin\/charts/)
   await page.goto('/admin/userManagement')
   await expect(page).toHaveURL(/\/admin\/charts/)
   const auth = await data(
@@ -180,6 +183,7 @@ test('ordinary admin is scoped and cannot open platform management', async ({ pa
   expect((await request.get('/api/user/pageList', { headers: tokenHeaders(auth) })).status()).toBe(
     403,
   )
+  expect((await request.get('/api/admin/audit/page', { headers: tokenHeaders(auth) })).status()).toBe(403)
 })
 test('user reserves once, cancels, and sees responsive pages and current account', async ({
   page,

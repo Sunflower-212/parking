@@ -21,3 +21,6 @@ data
 backups
 uploads
 exports
+**/logs
+**/*.log
+**/*.log.*.gz

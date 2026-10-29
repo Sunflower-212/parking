@@ -23,6 +23,7 @@ import java.util.concurrent.TimeUnit;
 @RequestMapping("/admin")
 @Validated
 public class AdminController {
+    @Autowired private org.zjmproject.service.AuditService audits;
     @Autowired
     private AdminService adminService;
 
@@ -34,6 +35,8 @@ public class AdminController {
     public Result<String> login(@Pattern(regexp = "^\\S{3,16}$") String username, @Pattern(regexp = "^\\S{3,16}$") String password){
         String adminname=username;
         Admin loginAdmin = adminService.findByAdminName(adminname);
+        var attributes=org.springframework.web.context.request.RequestContextHolder.getRequestAttributes();
+        if(loginAdmin!=null && attributes instanceof org.springframework.web.context.request.ServletRequestAttributes a){a.getRequest().setAttribute("log.actorId",loginAdmin.getId());a.getRequest().setAttribute("log.actorRole",loginAdmin.getPermissions());}
         if(loginAdmin==null){
             return Result.error("管理员不存在...");
         }
@@ -60,6 +63,7 @@ public class AdminController {
         Admin admin = adminService.findByAdminName(adminname);
         if(admin==null){
             adminService.register(adminname,password);
+            audits.success("admin.create",List.of(adminService.findByAdminName(adminname).getId()));
             return Result.success();
         }else {
             //占用
@@ -99,6 +103,7 @@ public class AdminController {
         //删除redis中对应的token
         ValueOperations<String, String> operations = stringRedisTemplate.opsForValue();
         operations.getOperations().delete("admin="+adminname);
+        audits.success("admin.password_change",List.of(current.getId()));
         return Result.success();
     }
 
@@ -154,6 +159,7 @@ public class AdminController {
         }
         adminService.updatePassword("123456",admin.getId());
         stringRedisTemplate.delete("admin="+adminName);
+        audits.success("admin.password_reset",List.of(admin.getId()));
         return Result.success();
 
     }
@@ -174,7 +180,9 @@ public class AdminController {
         if(permissions!=1){
             return Result.error("非超级管理员不能删除");
         }
+        int targetId=adminService.findByAdminName(admin_name).getId();
         adminService.deleteAdmin(admin_name);
+        audits.success("admin.delete",List.of(targetId));
         stringRedisTemplate.delete("admin="+admin_name);
         return Result.success();
     }
@@ -195,6 +203,7 @@ public class AdminController {
         if(admin.getPermissions()!=0 && admin.getPermissions()!=1) throw new IllegalArgumentException("管理员权限无效");
         //用户名密码一致
         adminService.register(admin.getAdmin_name(),admin.getAdmin_name(),admin.getPermissions());
+        audits.success("admin.create",List.of(adminService.findByAdminName(admin.getAdmin_name()).getId()));
         return Result.success();
     }
 

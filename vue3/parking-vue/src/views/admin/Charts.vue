@@ -3,6 +3,7 @@ import { ref, computed, onMounted, onBeforeUnmount, defineAsyncComponent } from 
 import request from '@/utils/request'
 import PageShell from '@/components/PageShell.vue'
 import { money, dateTime } from '@/utils/format'
+// 趋势图按需加载，只有进入统计页时才下载 ECharts 相关代码。
 const TrendChart = defineAsyncComponent(() => import('@/components/TrendChart.vue'))
 const data = ref(null),
   parks = ref([]),

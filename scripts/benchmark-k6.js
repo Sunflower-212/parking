@@ -3,6 +3,7 @@ import exec from 'k6/execution'
 import { Counter, Rate, Trend } from 'k6/metrics'
 
 const base = 'http://backend:8080'
+// 预热与正式采样分离；100 VU 是并发客户端数，不等于生产在线用户容量。
 const warmup = Number(__ENV.WARMUP || 120)
 const seconds = Number(__ENV.SECONDS || 300)
 const clients = Number(__ENV.CLIENTS || 100)
@@ -14,6 +15,7 @@ const requests = new Counter('measured_requests')
 const reads = new Counter('measured_reads')
 const writes = new Counter('measured_writes')
 const failures = new Rate('measured_errors')
+// 预期抢位冲突、准入拒绝与非预期错误分别统计，避免用失败请求堆高表面吞吐。
 const conflicts = new Counter('measured_conflicts')
 const rejected = new Counter('measured_rejected')
 const succeeded = new Counter('measured_successful_requests')

@@ -19,7 +19,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Verification infrastructure startup failed' }
     docker @composeArgs stop backend frontend
     if ($LASTEXITCODE -ne 0) { throw 'Could not stop verification writers before migration' }
-    foreach($name in @('004-capacity.sql','005-background-tasks.sql','006-capacity-buckets.sql')) {
+    foreach($name in @('004-capacity.sql','005-background-tasks.sql','006-capacity-buckets.sql','007-observability.sql')) {
         $source="SET @capacity_buckets=$CapacityBuckets;`n"+(Get-Content (Join-Path 'database/migrations' $name) -Raw)
         $source | docker @composeArgs exec -T mysql sh -c 'MYSQL_PWD="$MYSQL_PASSWORD" mysql -u"$MYSQL_USER" parking_springboot'
         if($LASTEXITCODE -ne 0){throw "Verification migration failed: $name"}

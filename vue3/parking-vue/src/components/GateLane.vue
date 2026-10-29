@@ -30,6 +30,7 @@ async function camera() {
   }
   busy.value = true
   try {
+    // 摄像头授权可能在离开页面后才完成，取得轨道后还要检查组件状态，必要时立即停止轨道。
     const result = await navigator.mediaDevices.getUserMedia({
       video: deviceId.value ? { deviceId: { exact: deviceId.value } } : true,
       audio: false,
@@ -69,6 +70,7 @@ async function uploadFile(e) {
     bitmap.close()
     return
   }
+  // 上传前限制图片最长边，降低车牌识别请求体与网络耗时；后端仍独立校验类型和大小。
   const ratio = Math.min(1, 1600 / Math.max(bitmap.width, bitmap.height))
   canvas.value.width = bitmap.width * ratio
   canvas.value.height = bitmap.height * ratio
@@ -96,6 +98,7 @@ async function submit() {
     busy.value = false
   }
 }
+// 关闭媒体轨道，避免切换页面后摄像头仍被占用。
 onBeforeUnmount(() => {
   disposed = true
   close()

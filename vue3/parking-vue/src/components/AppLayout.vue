@@ -42,6 +42,7 @@ const menu = computed(() =>
               ['userManagement', '用户管理', '◎'],
               ['rechargesManagement', '充值管理', '▣'],
               ['adminManagement', '管理员管理', '◇'],
+              ['auditLogs', '操作日志', '▤'],
             ]
           : []),
       ]
@@ -83,6 +84,7 @@ async function logout() {
     return
   }
   try {
+    // 服务端退出成功后才清空本地会话；网络或服务错误时保留登录状态供用户重试。
     await request.get(props.admin ? '/admin/logout' : '/user/logout')
     token.removeToken()
     adminStore.removeInfo()

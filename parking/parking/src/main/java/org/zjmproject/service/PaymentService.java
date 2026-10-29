@@ -41,10 +41,11 @@ public class PaymentService {
         Map<String,Object> charge=db.queryForMap("select * from recharges where id=? for update",id);
         BigDecimal expected=new BigDecimal(charge.get("amounts").toString()), paid=new BigDecimal(params.get("total_amount"));
         if(expected.compareTo(paid)!=0 || paid.signum()<=0 || ((Number)charge.get("pay_method")).intValue()!=0) throw new IllegalArgumentException("支付金额或支付方式不匹配");
-        if(((Number)charge.get("flag")).intValue()==1) return;
+        if(((Number)charge.get("flag")).intValue()==1){org.zjmproject.observability.RuntimeEvents.committed("payment.confirm","SKIPPED",id);return;}
         String trade=params.get("trade_no");
         if(trade==null || trade.isBlank()) throw new IllegalArgumentException("缺少支付流水号");
         if(db.update("update user set balance=balance+?,update_time=now() where id=?",expected,charge.get("user_id"))!=1) throw new IllegalStateException("充值用户不存在");
         db.update("update recharges set flag=1,pay_no=?,pay_time=? where id=?",trade,params.get("gmt_payment"),id);
+        org.zjmproject.observability.RuntimeEvents.committed("payment.confirm","SUCCESS",id);
     }
 }

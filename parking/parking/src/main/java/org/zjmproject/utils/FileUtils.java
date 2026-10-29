@@ -1,7 +1,6 @@
 package org.zjmproject.utils;
 
 import java.io.BufferedReader;
-import java.io.FileNotFoundException;
 import java.io.FileReader;
 import java.io.IOException;
 
@@ -17,10 +16,10 @@ public class FileUtils {
             while ((len = bufferedReader.read(buf)) != -1) {
                 sb.append(new String(buf, 0, len));
             }
-        } catch (FileNotFoundException e) {
-            e.printStackTrace();
         } catch (IOException e) {
-            e.printStackTrace();
+            // 不把可能包含本地私密路径的异常原文写入控制台。
+            org.slf4j.LoggerFactory.getLogger(FileUtils.class).atWarn().addKeyValue("event","file.read")
+                .addKeyValue("result","FAILURE").addKeyValue("reasonCode",e.getClass().getSimpleName()).log("file_unavailable");
         }
         return sb.toString();
     }

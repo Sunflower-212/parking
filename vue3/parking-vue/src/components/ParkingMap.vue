@@ -18,6 +18,7 @@ let observer,
   frame,
   down,
   dragged = false
+// 按行列建立坐标索引，绘制和点击直接定位单元格，避免每次扫描整层车位数组。
 const index = computed(
   () => new Map(props.spaces.map((s) => [coordinateKey(s.spaces_row, s.spaces_col), s])),
 )
@@ -32,6 +33,7 @@ const colors = {
 function draw() {
   const el = canvas.value
   if (!el) return
+  // 以受限设备像素比提升清晰度；交互坐标始终使用 CSS 像素，不重复乘设备像素比。
   const dpr = Math.min(devicePixelRatio || 1, 2)
   el.width = width.value * dpr
   el.height = height * dpr
@@ -42,6 +44,7 @@ function draw() {
   ctx.save()
   ctx.translate(offset.value.x, offset.value.y)
   ctx.scale(scale.value, scale.value)
+  // 反算可视范围，只遍历屏幕附近单元格，缩放和拖动时不绘制整张地图。
   const minCol = Math.max(1, Math.floor(-offset.value.x / (CELL * scale.value))),
     maxCol = Math.ceil((width.value - offset.value.x) / (CELL * scale.value)) + 1,
     minRow = Math.max(1, Math.floor(-offset.value.y / (CELL * scale.value))),
@@ -77,6 +80,7 @@ function draw() {
     }
   ctx.restore()
 }
+// 同一帧中的多次状态变化合并为一次绘制，避免指针移动触发重复渲染。
 function schedule() {
   cancelAnimationFrame(frame)
   frame = requestAnimationFrame(draw)
@@ -95,6 +99,7 @@ function pointerMove(e) {
   if (!down) return
   const dx = e.clientX - down.x,
     dy = e.clientY - down.y
+  // 超过拖动阈值后不再当作单击选择，避免平移地图时误选车位。
   if (Math.abs(dx) + Math.abs(dy) > 4) dragged = true
   if (dragged) {
     offset.value = { x: down.ox + dx, y: down.oy + dy }
@@ -104,6 +109,7 @@ function pointerMove(e) {
 function pointerUp(e) {
   if (!down) return
   if (!dragged && !props.disabled) {
+    // 将屏幕点击逆变换为地图行列，保持平移、缩放后的命中位置与实际绘制一致。
     const point = cellAt(
       e.clientX,
       e.clientY,

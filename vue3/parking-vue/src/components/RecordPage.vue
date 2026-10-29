@@ -102,6 +102,7 @@ async function action(row, type) {
     submitting.value = false
   }
 }
+// 规则与管理员选项统一加载；仅超级管理员请求管理员列表，加载失败时阻止提交不完整关联。
 async function loadSources() {
   if (props.page === 'parks') {
     sourcesController?.abort()
@@ -116,6 +117,7 @@ async function loadSources() {
           ? request.get('/admin/list', { signal: controller.signal })
           : Promise.resolve({ data: [] }),
       ])
+      // 重复加载下拉选项时，仅最后一次请求可写入状态，卸载后的结果直接丢弃。
       if (disposed || controller !== sourcesController) return
       sources.value = {
         rules: results[0].data.map((r) => ({ value: r.id, label: r.rule_name })),

@@ -6,6 +6,7 @@ import { useTokenStore } from '@/stores/token'
 import request from '@/utils/request'
 import { cleanQuery } from '@/utils/format'
 const props = defineProps({ filters: { type: Object, required: true } })
+// 按用户隔离当前标签页的任务记录，刷新或离开页面后可恢复自己的导出状态。
 const storageKey = `parking-export:${jwtDecode(useTokenStore().token).claims.id}`
 const job = ref(sessionStorage.getItem(storageKey) || ''), state = ref(''), busy = ref(false), failed = ref(false), uncertain = ref(false)
 let timer, controller, actionController, disposed = false, requestKey = null, requestFilters = null
@@ -21,6 +22,7 @@ function clearPending() {
 const pending = () => job.value && !['DONE', 'EXPIRED', 'DEAD', 'DEAD_PENDING', 'PAUSED'].includes(state.value)
 function schedule() {
   clearTimeout(timer)
+  // 只在页面可见且任务未结束时轮询；使用单次定时器避免慢请求形成重叠轮询。
   if (!disposed && !document.hidden && pending() && !failed.value) timer = setTimeout(refresh, 2000)
 }
 async function refresh() {
@@ -50,6 +52,7 @@ async function create() {
   try {
     const capability = await request.get('/admin/background/capabilities', { signal: actionController.signal })
     if (disposed) return
+    // RabbitMQ 后台功能关闭时走兼容同步导出，普通导出能力不依赖可选中间件。
     if (!capability.data.exports) {
       clearPending()
       if (pending()) { clearTimeout(timer); controller?.abort(); controller = null; state.value = 'PAUSED' }
@@ -58,6 +61,7 @@ async function create() {
       return
     }
     if (pending()) { await refresh(); return }
+    // 请求结果不确定时复用同一幂等键与筛选快照，防止重试创建第二个任务或改变第一次请求含义。
     requestKey ||= crypto.randomUUID(); requestFilters ||= cleanQuery({ ...props.filters })
     sessionStorage.setItem(storageKey + ':pending', JSON.stringify({ key: requestKey, filters: requestFilters }))
     const response = await request.post('/admin/background/exports', requestFilters, { headers: { 'Idempotency-Key': requestKey }, signal: actionController.signal })
@@ -65,6 +69,7 @@ async function create() {
     job.value = response.data.id; state.value = 'READY'; failed.value = false
     sessionStorage.setItem(storageKey, job.value); clearPending(); schedule()
   } catch (error) {
+    // 明确业务拒绝才清理待确认请求；断网或超时不能证明服务端未创建任务，保留原键供重试。
     if (error.code === 1 || [400, 401, 403].includes(error.response?.status)) clearPending()
     else if (requestKey && !disposed) uncertain.value = true
   }
@@ -80,6 +85,7 @@ async function download() {
 }
 function visible() { if (document.hidden) { clearTimeout(timer); controller?.abort() } else if (job.value) refresh() }
 onMounted(() => { document.addEventListener('visibilitychange', visible); if (job.value) refresh() })
+// 卸载后停止状态轮询、创建和下载请求，保留会话存储中的任务 ID 供下次恢复。
 onBeforeUnmount(() => { disposed = true; clearTimeout(timer); controller?.abort(); actionController?.abort(); document.removeEventListener('visibilitychange', visible) })
 </script>
 <template>

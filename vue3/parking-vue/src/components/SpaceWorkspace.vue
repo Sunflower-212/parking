@@ -42,6 +42,7 @@ async function refresh() {
   try {
     const params = { park_id: parkId.value, spaces_storey: floor.value },
       options = { params, signal: controller.signal }
+    // 静态布局与实时状态并行读取，用户当前预约单独确认；合并显示不改变后端占位校验。
     const [layout, state, entry] = await Promise.all([
       request.get('/spaces/layout', options),
       request.get('/spaces/availability', options),
@@ -49,6 +50,7 @@ async function refresh() {
         ? Promise.resolve({ data: [] })
         : request.get('/enter/userEnterOrReservation', { signal: controller.signal }),
     ])
+    // 切换停车场或楼层后，旧楼层的慢响应不得覆盖当前视图。
     if (disposed || id !== version) return
     const flags = new Map(state.data.map((s) => [s.id, s.spaces_flag]))
     spaces.value = layout.data.map((s) => ({
@@ -90,6 +92,7 @@ function selectRow(row) {
   }
 }
 async function reserve() {
+  // 提交中阻止重复点击；地图显示只供选择，预约是否成功以数据库事务结果为准。
   if (busy.value || selected.value.length !== 1) return
   busy.value = true
   try {
@@ -185,6 +188,7 @@ async function remove() {
     busy.value = false
   }
 }
+// 页面隐藏时停止轮询，重新可见时立即刷新；提交和加载期间跳过自动刷新，减少请求竞争。
 function visibility() {
   clearInterval(timer)
   if (!document.hidden) {
@@ -212,6 +216,7 @@ onMounted(async () => {
     if (!document.hidden && !busy.value && !loading.value) refresh()
   }, 15000)
 })
+// 统一回收定时器、可见性监听和请求，并使在途响应失效，防止离开地图后继续更新状态。
 onBeforeUnmount(() => {
   disposed = true
   version++

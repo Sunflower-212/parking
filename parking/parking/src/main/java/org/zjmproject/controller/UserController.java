@@ -46,6 +46,7 @@ import java.util.concurrent.TimeUnit;
 @RequestMapping("/user")
 @Validated
 public class UserController {
+    @Autowired private org.zjmproject.service.AuditService audits;
     @Autowired private PaymentService payments;
     @Autowired private MembershipService membership;
     @Autowired private org.springframework.jdbc.core.JdbcTemplate db;
@@ -191,6 +192,7 @@ public class UserController {
         }
         userService.updatePassword("123456",user.getId());
         stringRedisTemplate.delete("user="+userName);
+        audits.success("user.password_reset",List.of(user.getId()));
         return Result.success();
 
     }
@@ -222,6 +224,7 @@ public class UserController {
             if(Boolean.TRUE.equals(db.queryForObject("select exists(select 1 from enter where user_id=?) or exists(select 1 from orders where user_id=?) or exists(select 1 from recharges where user_id=?)",Boolean.class,uid,uid,uid))) return Result.error("该用户存在业务记录，无法删除");
             userService.deleteUser(user_name);
             stringRedisTemplate.delete("user="+user_name);
+            audits.success("user.delete",List.of(uid));
             return Result.success();
         }
         return Result.error("非本人或者管理员，无法删除该用户");
@@ -302,6 +305,7 @@ public class UserController {
     @PostMapping("/addUser")
     public Result<?> addUser(@RequestBody @Validated CreateUserRequest user){
         db.update("insert into user(user_name,password,name,plate_num,car_color,tel_num,create_time,update_time) values(?,?,?,nullif(?,''),?,nullif(?,''),now(),now())",user.user_name(),Md5Util.encode(user.user_name()),user.name()==null?"":user.name(),user.plate_num(),user.car_color()==null?"":user.car_color(),user.tel_num());
+        audits.success("user.create",List.of(userService.findByUserName(user.user_name()).getId()));
         return Result.success();
     }
     /*
@@ -336,6 +340,7 @@ public class UserController {
         writer.flush();
     }
 
+    // 兼容同步导出也使用 ID 游标，每批最多 500 条；批次查询不需要 COUNT，内存不随导出总量增长。
     private List<User> exportBatch(long after,String plate,String color,Integer status,String name) {
         StringBuilder sql=new StringBuilder("select id,user_name,name,plate_num,car_color,tel_num,status from user where id>?");
         java.util.List<Object> args=new java.util.ArrayList<>();args.add(after);

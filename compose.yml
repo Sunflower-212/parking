@@ -1,4 +1,9 @@
 name: parking
+x-runtime-logging: &runtime-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
 services:
   mysql:
     mem_limit: ${MYSQL_MEMORY_LIMIT:-2g}
@@ -18,6 +23,7 @@ services:
       interval: 5s
       timeout: 4s
       retries: 40
+    logging: *runtime-logging
     restart: unless-stopped
   redis:
     mem_limit: ${REDIS_STATE_LIMIT:-1536m}
@@ -32,6 +38,7 @@ services:
       interval: 5s
       timeout: 4s
       retries: 20
+    logging: *runtime-logging
     restart: unless-stopped
   redis-cache:
     mem_limit: ${REDIS_CACHE_LIMIT:-512m}
@@ -44,6 +51,7 @@ services:
       interval: 5s
       timeout: 4s
       retries: 20
+    logging: *runtime-logging
     restart: unless-stopped
   backend:
     mem_limit: ${BACKEND_MEMORY_LIMIT:-2g}
@@ -51,6 +59,15 @@ services:
       context: .
       dockerfile: deploy/backend.Dockerfile
     environment:
+      PARKING_LOG_DIR: /app/logs
+      APP_LOG_LEVEL: ${APP_LOG_LEVEL:-INFO}
+      BUSINESS_LOG_LEVEL: ${BUSINESS_LOG_LEVEL:-INFO}
+      REQUEST_LOG_ENABLED: ${REQUEST_LOG_ENABLED:-true}
+      SLOW_REQUEST_MS: ${SLOW_REQUEST_MS:-500}
+      READ_LOG_SAMPLE: ${READ_LOG_SAMPLE:-0.1}
+      LOG_MAX_FILE_SIZE: ${LOG_MAX_FILE_SIZE:-25MB}
+      LOG_HISTORY_DAYS: ${LOG_HISTORY_DAYS:-14}
+      LOG_TOTAL_SIZE_CAP: ${LOG_TOTAL_SIZE_CAP:-1GB}
       DB_URL: jdbc:mysql://mysql:3306/parking_springboot?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai
       DB_USER: parking
       DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD}
@@ -88,6 +105,7 @@ services:
       OSS_ACCESS_KEY_SECRET: ${OSS_ACCESS_KEY_SECRET:-}
       OSS_BUCKET: ${OSS_BUCKET:-}
       OSS_ENDPOINT: ${OSS_ENDPOINT:-}
+    volumes: [backend-logs:/app/logs]
     depends_on:
       mysql: {condition: service_healthy}
       redis: {condition: service_healthy}
@@ -97,6 +115,7 @@ services:
       timeout: 5s
       start_period: 40s
       retries: 12
+    logging: *runtime-logging
     restart: unless-stopped
   frontend:
     mem_limit: ${FRONTEND_MEMORY_LIMIT:-256m}
@@ -107,7 +126,9 @@ services:
       - "${HTTP_BIND:-127.0.0.1}:${HTTP_PORT:-8088}:80"
     depends_on:
       backend: {condition: service_healthy}
+    logging: *runtime-logging
     restart: unless-stopped
 volumes:
+  backend-logs:
   mysql-data:
   redis-data:

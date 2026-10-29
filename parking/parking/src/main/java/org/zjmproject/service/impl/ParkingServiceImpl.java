@@ -32,6 +32,7 @@ public class ParkingServiceImpl implements ParkingService {
         if(parking.getPark_storey()==null || parking.getPark_storey()<1) throw new IllegalArgumentException("停车场至少需要一层");
         parking.setPark_mount(0); parking.setPark_spare(0);
         parkingMapper.addParking(parking);
+        // 新停车场先初始化全部容量桶；后续所有容量读取统一使用汇总视图，不再更新旧计数字段。
         capacity.rebuild(parking.getId());
         background.audit("parking.create",List.of(parking.getId()));cache.invalidateAfterCommit("catalog");
     }
@@ -40,6 +41,7 @@ public class ParkingServiceImpl implements ParkingService {
     @org.springframework.transaction.annotation.Transactional
     public void updateParking(Parking parking) {
         validate(parking);
+        // 资料修改使用排他锁，与车辆事务的共享锁协调，阻止归属或结构变化穿插在车辆操作中。
         db.queryForObject("select id from parking where id=? for update",Integer.class,parking.getId());
         // The controller may have established an older repeatable-read snapshot before
         // obtaining the metadata lock. Use a current read for the structural invariant.

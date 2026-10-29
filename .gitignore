@@ -35,3 +35,7 @@ exports/
 .DS_Store
 **/__pycache__/
 *.py[cod]
+
+# Runtime log directories and compressed rotations
+**/logs/
+*.log.*.gz

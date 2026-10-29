@@ -66,6 +66,7 @@ const routes = [
       { path: '/admin/adminManagement', component: AdminManagementVue },
       { path: '/admin/charts', component: ChartsVue },
       { path: '/admin/security', component: UserResetPasswordVue },
+      { path: '/admin/auditLogs', component: () => import('@/views/admin/AuditLog.vue') },
     ],
   },
 ]
@@ -86,8 +87,9 @@ router.beforeEach((to) => {
     if (![-1, 0, 1].includes(role)) throw new Error('role')
     if (to.path.startsWith('/admin') && role === -1) return '/user'
     if (
+      // 路由守卫同步限制平台管理页面，但只是界面控制；接口权限仍由后端独立验证。
       role === 0 &&
-      ['/admin/userManagement', '/admin/rechargesManagement', '/admin/adminManagement'].includes(
+      ['/admin/userManagement', '/admin/rechargesManagement', '/admin/adminManagement', '/admin/auditLogs'].includes(
         to.path,
       )
     )

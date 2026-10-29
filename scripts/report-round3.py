@@ -11,6 +11,7 @@ def read(label,n):
     assert row['requests']>0 and row['clients']==100 and row['business_date_start']==row['business_date_end']
     return row
 
+# 这里计算三轮各自 P95 的中位数，不是合并全部请求后的总体 P95，也不能叫平均 P95。
 def median(rows,name):return statistics.median(r['groups'][name]['p(95)'] for r in rows)
 def mean_rps(rows):return statistics.mean(r['rps'] for r in rows)
 def change(before,after):return (after/before-1)*100

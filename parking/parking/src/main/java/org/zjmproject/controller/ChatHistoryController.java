@@ -16,9 +16,10 @@ import java.util.List;
 @RequiredArgsConstructor
 @RestController
 @RequestMapping("/ai/history")
-@org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(name="parking.integrations.ai", havingValue="true")
+@org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(name = "parking.integrations.ai", havingValue = "true")
 public class ChatHistoryController {
-    @Autowired private org.springframework.jdbc.core.JdbcTemplate db;
+    @Autowired
+    private org.springframework.jdbc.core.JdbcTemplate db;
     @Autowired
     private ChatHistoryRepository chatHistoryRepository;
 
@@ -32,10 +33,11 @@ public class ChatHistoryController {
 
     @GetMapping("/{type}/{chatId}")
     public List<MessageV0> getChatHistory(@PathVariable("type") String type, @PathVariable("chatId") String chatId) {
-        int actorId=org.zjmproject.service.AccessGuard.userId();
-        if(db.queryForObject("select count(*) from historicalSession where chatId=? and userId=? and type=?",Integer.class,chatId,Integer.toString(actorId),type)!=1) throw new IllegalArgumentException("无权访问此会话");
-        List<Message> messages = chatMemory.get(actorId+":"+chatId,1000);
-        if(messages==null){
+        int actorId = org.zjmproject.service.AccessGuard.userId();
+        if (db.queryForObject("select count(*) from historicalSession where chatId=? and userId=? and type=?", Integer.class, chatId, Integer.toString(actorId), type) != 1)
+            throw new IllegalArgumentException("无权访问此会话");
+        List<Message> messages = chatMemory.get(actorId + ":" + chatId, 1000);
+        if (messages == null) {
             return List.of();
         }
         return messages.stream().map(MessageV0::new).toList();

@@ -21,6 +21,7 @@
             <if test="parkName!=null">
                 p.park_name like concat('%',#{parkName},'%')
             </if>
+            <!-- OGNL 空串直接使用单引号，不能写成带反斜杠的转义引号，否则动态 SQL 构建会失败。 -->
             <if test="parkAddress != null and parkAddress != ''">
                 and p.park_address like concat('%',#{parkAddress},'%')
             </if>

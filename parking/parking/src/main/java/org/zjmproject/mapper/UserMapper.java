@@ -13,6 +13,7 @@ import java.util.Map;
 public interface UserMapper {
     @Select("select count(*) from user") Long countUsers();
     @Select("select count(*) from user where create_time>=#{from} and create_time<#{to}") Long countNewUsers(LocalDateTime from,LocalDateTime to);
+    // 会员维护按状态与到期索引每批更新最多 500 条，避免加载全部会员并逐条写回。
     @Update("update user set status=0,update_time=now() where status=1 and vip_end_time<#{now} order by vip_end_time,id limit 500") int expireVip(LocalDateTime now);
     //根据用户名查询用户
     @Select("select * from user where user_name=#{username}")

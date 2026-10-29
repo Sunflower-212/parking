@@ -14,9 +14,11 @@ import java.nio.charset.StandardCharsets;
 import java.util.*;
 
 /** SQL is the durable task ledger; broker messages carry only an event ID. */
+// MySQL 事件表保存任务事实，RabbitMQ 只传事件 ID；MQ 停机时任务保留，车辆核心事务不依赖 MQ。
 @Service
 public class BackgroundTasks {
     private static final org.slf4j.Logger log=org.slf4j.LoggerFactory.getLogger(BackgroundTasks.class);
+    @org.springframework.beans.factory.annotation.Autowired private AuditService audits;
     private final JdbcTemplate db;
     private final ObjectMapper json;
     private final TransactionTemplate tx;
@@ -47,6 +49,7 @@ public class BackgroundTasks {
         if(!enabled)throw new IllegalStateException("后台导出未启用，请使用直接导出");
         int actor=root();
         if(key==null || !key.matches("[A-Za-z0-9-]{16,64}"))throw new IllegalArgumentException("请提供有效的请求标识");
+        // 只接受白名单筛选字段；执行者身份由服务端上下文取得，不允许请求指定导出用户或权限。
         var clean=new LinkedHashMap<String,Object>();
         for(String name:List.of("user_name","plate_num","car_color")) {
             Object raw=filters.get(name);
@@ -57,25 +60,24 @@ public class BackgroundTasks {
         return tx.execute(t->{
             // Serializes only administrative task creation, not vehicle operations.
             db.queryForObject("select id from admin where id=? for update",Integer.class,actor);
+            // 同一管理员的同一请求键复用任务，处理响应丢失后的客户端重试，避免重复生成文件。
             var old=db.queryForList("select id from background_event where actor_id=? and kind='EXPORT' and request_key=?",String.class,actor,key);
             if(!old.isEmpty())return old.get(0);
             if(db.queryForObject("select count(*) from background_event where actor_id=? and kind='EXPORT' and status not in ('DONE','EXPIRED','DEAD')",Integer.class,actor)>=3)throw new IllegalStateException("请等待现有导出任务完成");
+            // 固定导出 ID 上界，避免执行期间新增用户使任务无限增长；各批读取不是全库一致性快照。
             clean.put("upperId",db.queryForObject("select coalesce(max(id),0) from user",Long.class));
             String id=UUID.randomUUID().toString();
-            db.update("insert into background_event(id,actor_id,kind,request_key,payload) values(?,?,'EXPORT',?,?)",id,actor,key,encode(clean));
+            db.update("insert into background_event(id,actor_id,kind,request_key,payload,request_id) values(?,?,'EXPORT',?,?,?)",id,actor,key,encode(clean),org.zjmproject.observability.RuntimeEvents.requestId());
+            audits.success("export.create",List.of(id));
             return id;
         });
     }
     public void audit(String action,Collection<Integer> ids) {
-        if(!enabled)return;
-        if(!TransactionSynchronizationManager.isActualTransactionActive())throw new IllegalStateException("Audit must be recorded in the business transaction");
-        var actor=ThreadLocalUtil.<Map<String,Object>>get();
-        if(actor==null)throw new IllegalStateException("Missing audit actor");
-        String id=UUID.randomUUID().toString();
-        db.update("insert into background_event(id,actor_id,kind,request_key,payload) values(?,?,'AUDIT',?,?)",id,actor.get("id"),id,encode(Map.of("action",action,"ids",ids)));
+        audits.success(action,ids);
     }
     private Map<String,Object> owned(String id) {
         int actor=root();
+        // 状态和文件下载均按超级管理员身份及任务所有者过滤，知道任务 ID 也不能读取他人的导出。
         var rows=db.queryForList("select *,coalesce(expires_at>now(3),0) file_valid from background_event where id=? and actor_id=? and kind='EXPORT'",id,actor);
         if(rows.isEmpty())throw new IllegalArgumentException("导出任务不存在");
         return rows.get(0);
@@ -104,6 +106,7 @@ public class BackgroundTasks {
     }
     public Map<String,Object> claimDelivery() {
         return tx.execute(t->{
+            // 跳过已被其他投递器锁定的事件；available_at 同时用于重试时间与租约到期恢复。
             var rows=db.queryForList("select * from background_event where status in ('READY','PUBLISHING','SENT','RUNNING','DEAD_PENDING') and available_at<=now(3) order by available_at,id limit 1 for update skip locked");
             if(rows.isEmpty())return null;
             var row=rows.get(0);String lease=UUID.randomUUID().toString();boolean dead="DEAD_PENDING".equals(row.get("status"));
@@ -111,6 +114,7 @@ public class BackgroundTasks {
             row.put("lease_token",lease);row.put("dead",dead);return row;
         });
     }
+    // 状态回写携带租约令牌，并限定原状态，防止迟到 Confirm 覆盖已开始消费或被重新领取的任务。
     public void delivered(Map<String,Object> row) {
         db.update("update background_event set status=?,available_at=date_add(now(3),interval 5 minute) where id=? and lease_token=? and status=?",Boolean.TRUE.equals(row.get("dead"))?"DEAD":"SENT",row.get("id"),row.get("lease_token"),Boolean.TRUE.equals(row.get("dead"))?"DEAD_PENDING":"PUBLISHING");
     }
@@ -123,38 +127,46 @@ public class BackgroundTasks {
         var row=tx.execute(t->{
             var rows=db.queryForList("select * from background_event where id=? for update",id);
             if(rows.isEmpty())return null;var r=rows.get(0);
+            // 只领取允许执行的状态，重复消息遇到 RUNNING 或终态直接返回；过期租约由投递器重新领取。
             if(!Set.of("PUBLISHING","SENT").contains(r.get("status")))return null;
             db.update("update background_event set status='RUNNING',lease_token=?,available_at=date_add(now(3),interval 5 minute) where id=?",lease,id);
             return r;
         });
-        if(row==null)return;
-        try {
+        if(row==null){org.zjmproject.observability.RuntimeEvents.event("background.consume","SKIPPED",id);return;}
+        try (var context=org.zjmproject.observability.RuntimeEvents.scope((String)row.get("request_id"))) {
             var payload=decode(row.get("payload").toString());
             if("AUDIT".equals(row.get("kind"))) {
                 tx.executeWithoutResult(t->{
                     // Check fencing token while holding the event row before writing the effect.
+                    // 在持有事件锁时验证栅栏令牌；失去租约的旧消费者不能再写审计副作用或完成状态。
                     var token=db.queryForObject("select lease_token from background_event where id=? for update",String.class,id);
                     if(!lease.equals(token))return;
-                    db.update("insert ignore into admin_audit(event_id,actor_id,action,entity_ids,occurred_at) values(?,?,?,?,?)",id,row.get("actor_id"),payload.get("action"),encode(payload.get("ids")),row.get("created_at"));
+                    // 以事件 ID 唯一约束实现审计幂等，消息重复投递不会产生第二条审计记录。
+                    audits.persist(id,row.get("actor_id"),row.get("created_at"),payload);
                     db.update("update background_event set status='DONE',completed_at=now(3),error_code=null where id=?",id);
                 });
-            } else if("EXPORT".equals(row.get("kind"))) export(id,lease,payload);
+            } else if("EXPORT".equals(row.get("kind"))) export(id,lease,payload,((Number)row.get("actor_id")).intValue());
             else throw new IllegalStateException("Unknown event type");
         } catch(Exception e) {
             // Durable bounded retry before ACK. A DB failure escapes, leaving the broker delivery unacknowledged.
+            // 业务失败先持久化有限退避重试或死信状态，再交给监听器 ACK；数据库写失败则抛出并重新投递。
             int attempt=((Number)row.get("attempts")).intValue()+1;
             metrics.counter("parking.background.execution.failure").increment();
-            log.warn("Background event {} attempt {} failed ({})",id,attempt,e.getClass().getSimpleName());
+            try(var context=org.zjmproject.observability.RuntimeEvents.scope((String)row.get("request_id"))){
+                log.warn("Background event {} attempt {} failed ({})",id,attempt,e.getClass().getSimpleName());
+                org.zjmproject.observability.RuntimeEvents.event("background.retry",attempt>=5?"DEAD_PENDING":"RETRY",id);
+            }
             db.update("update background_event set status=?,attempts=attempts+1,available_at=timestampadd(second,?,now(3)),error_code=? where id=? and lease_token=? and status='RUNNING'",attempt>=5?"DEAD_PENDING":"READY",Math.min(60,1<<attempt),e.getClass().getSimpleName(),id,lease);
         }
     }
-    private void export(String id,String lease,Map<String,Object> filter) throws Exception {
+    private void export(String id,String lease,Map<String,Object> filter,int actor) throws Exception {
         Files.createDirectories(directory);Path tmp=safeFile(lease+".tmp"),file=safeFile(lease+".csv");
         boolean kept=false;
         try {
             try(var out=Files.newBufferedWriter(tmp,StandardCharsets.UTF_8,StandardOpenOption.CREATE_NEW)) {
                 out.write("\ufeff用户名,姓名,车牌,车辆颜色,手机号,会员状态\r\n");
                 long heartbeat=System.nanoTime()+java.util.concurrent.TimeUnit.SECONDS.toNanos(30);
+                // 每批按 ID 游标读取 500 条，只选导出字段；不做深 OFFSET，也不重复查询总数。
                 for(long after=0;;) {
                     var args=new ArrayList<Object>();args.add(after);args.add(filter.get("upperId"));
                     var sql=new StringBuilder("select id,user_name,name,plate_num,car_color,tel_num,status from user where id>? and id<=?");
@@ -162,6 +174,7 @@ public class BackgroundTasks {
                     if(filter.containsKey("status")){sql.append(" and status=?");args.add(filter.get("status"));}
                     var rows=db.queryForList(sql.append(" order by id limit 500").toString(),args.toArray());
                     for(var user:rows){boolean first=true;for(String key:List.of("user_name","name","plate_num","car_color","tel_num","status")){if(!first)out.write(',');first=false;out.write(csv(Objects.toString(user.get(key),"")));}out.write("\r\n");}
+                    // 长导出定期续租；条件更新失败说明执行权已转移，旧执行器立即停止。
                     if(System.nanoTime()>=heartbeat) {
                         if(db.update("update background_event set available_at=date_add(now(3),interval 5 minute) where id=? and lease_token=? and status='RUNNING'",id,lease)!=1)throw new IllegalStateException("Lease expired");
                         heartbeat=System.nanoTime()+java.util.concurrent.TimeUnit.SECONDS.toNanos(30);
@@ -169,13 +182,17 @@ public class BackgroundTasks {
                     if(rows.size()<500)break;after=((Number)rows.get(rows.size()-1).get("id")).longValue();
                 }
             }
+            // 先关闭并刷盘临时文件，再原子改名；最后带租约更新任务结果，避免把半成品暴露给下载接口。
             try(var channel=java.nio.channels.FileChannel.open(tmp,StandardOpenOption.WRITE)){channel.force(true);}
             Files.move(tmp,file,StandardCopyOption.ATOMIC_MOVE);
-            kept=db.update("update background_event set status='DONE',completed_at=now(3),expires_at=date_add(now(3),interval 24 hour),result_file=?,error_code=null where id=? and lease_token=? and status='RUNNING'",file.getFileName().toString(),id,lease)==1;
+            kept=Boolean.TRUE.equals(tx.execute(t->{boolean done=db.update("update background_event set status='DONE',completed_at=now(3),expires_at=date_add(now(3),interval 24 hour),result_file=?,error_code=null where id=? and lease_token=? and status='RUNNING'",file.getFileName().toString(),id,lease)==1;
+                if(done)audits.record("export.complete",List.of(id),actor,1,"SUCCESS",null,false);return done;}));
         } finally {Files.deleteIfExists(tmp);if(!kept)Files.deleteIfExists(file);}
     }
+    // CSV 字段既要转义引号，也要防止以公式符号开头的内容在电子表格中被执行。
     static String csv(String value){if(value.stripLeading().matches("(?s)^[=+@-].*"))value="'"+value;return "\""+value.replace("\"","\"\"")+"\"";}
     public void cleanup() throws Exception {
+        // 按过期索引每次清理有限任务；先删文件再标记过期，删除失败可在下一轮继续重试。
         for(var row:db.queryForList("select id,result_file from background_event where kind='EXPORT' and expires_at<=now(3) and status='DONE' order by expires_at,id limit 100")) {
             if(row.get("result_file")!=null)Files.deleteIfExists(safeFile(row.get("result_file").toString()));
             db.update("update background_event set status='EXPIRED',result_file=null where id=? and status='DONE'",row.get("id"));

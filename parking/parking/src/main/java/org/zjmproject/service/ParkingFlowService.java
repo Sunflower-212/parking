@@ -17,6 +17,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import org.zjmproject.observability.RuntimeEvents;
 
 /** Lock order: user, shared parking metadata, space, entry, capacity (last SQL). */
 @Service
@@ -48,7 +49,9 @@ public class ParkingFlowService {
     private int number(Map<String,Object> row,String key) { return ((Number)row.get(key)).intValue(); }
     private Map<String,Object> lockUser(int id) { return one("select id,user_name,plate_num from user where id=? for update",id); }
     private void lockPark(int id) {
+        // 共享锁允许不同车位并行处理，同时阻止停车场资料被删除或转移归属。
         var parking=one("select id,admin_id from parking where id=? for share",id);
+        // 从查询返回到事务完成的应用计时，仅用于定位锁窗口，不能当作数据库精确持锁时长。
         long lockedAt=System.nanoTime();
         if(org.springframework.transaction.support.TransactionSynchronizationManager.isSynchronizationActive())org.springframework.transaction.support.TransactionSynchronizationManager.registerSynchronization(new org.springframework.transaction.support.TransactionSynchronization(){@Override public void afterCompletion(int status){metrics.timer("parking.flow.park.lock.hold").record(System.nanoTime()-lockedAt,java.util.concurrent.TimeUnit.NANOSECONDS);}});
         Map<String,Object> actor=org.zjmproject.utils.ThreadLocalUtil.get();
@@ -76,6 +79,7 @@ public class ParkingFlowService {
         if(db.update("update spaces set spaces_flag=0,user_name=null,active_enter_id=null,update_time=now() where id=? and active_enter_id=?",entry.get("space_id"),entry.get("id"))!=1)
             throw new IllegalStateException("车位关联异常，未执行释放，请联系管理员核对");
     }
+    // 先锁车位再锁入场记录，与预约、取消、过期和出场保持一致，减少反向加锁死锁。
     private Map<String,Object> lockEntry(Map<String,Object> initial) {
         if(initial.get("space_id")==null) throw new IllegalStateException("旧记录缺少车位关联，请先完成迁移");
         one("select id from spaces where id=? for update",initial.get("space_id"));
@@ -88,12 +92,14 @@ public class ParkingFlowService {
     }
 
     public Enter reserve(int userId,int spaceId) {
+        // 将事务统一交给准入服务开启；同类入口也必须先准入，不能在控制器外包事务。
         return admission.execute(null,()->reserveLocked(userId,spaceId));
     }
     private Enter reserveLocked(int userId,int spaceId) {
         Map<String,Object> user=lockUser(userId);
         String plate=(String)user.get("plate_num");
         if(plate==null || !plate.matches(org.zjmproject.pojo.User.LICENSE_PLATE_REGEX)) throw new IllegalArgumentException("请先完善有效车牌信息");
+        // 使用有效用户唯一索引查询当前记录，避免遍历用户历史；唯一约束同时兜底并发重复预约。
         if(db.queryForObject("select count(*) from enter where active_user_id=?",Integer.class,userId)>0)
             throw new IllegalStateException("您已有预约或车辆在场");
         int parkId=number(one("select park_id from spaces where id=?",spaceId),"park_id");
@@ -103,8 +109,10 @@ public class ParkingFlowService {
         LocalDateTime start=now(), expires=start.plus(timeout);
         int id=insertEntry(user,parkId,spaceId,0,1,start,expires);
         occupy(spaceId,id,(String)user.get("user_name"));
-        db.update("insert into reservation_event(reservation_id,expires_at) values(?,?)",id,expires);
+        db.update("insert into reservation_event(reservation_id,expires_at,request_id) values(?,?,?)",id,expires,RuntimeEvents.requestId());
         events.publishEvent(new ReservationCreated(id));
+        RuntimeEvents.committed("reservation.create","SUCCESS",id);
+        // 容量更新放在事务最后；前面的预约记录与持久化事件均已写入，提交后才异步投递。
         capacity.adjust(parkId,spaceId,-1); // Last database statement: keep the capacity lock window short.
         Enter result=new Enter(); result.setId(id); result.setSpace_id(spaceId); result.setPark_id(parkId); result.setReserved_at(start); result.setExpires_at(expires); result.setFlag(0); result.setReservation(1);
         return result;
@@ -117,11 +125,12 @@ public class ParkingFlowService {
         Map<String,Object> initial=one("select id,user_id,park_id,space_id,flag,reservation from enter where id=?",id);
         if(number(initial,"user_id")!=userId) throw new IllegalArgumentException("不能取消他人的预约");
         if(number(initial,"flag")!=0) throw new IllegalStateException("已入场记录不能取消预约");
-        if(number(initial,"reservation")!=1)return;
+        if(number(initial,"reservation")!=1){RuntimeEvents.committed("reservation.cancel","SKIPPED",id);return;}
         lockPark(number(initial,"park_id"));
         Map<String,Object> entry=lockEntry(initial);
         if(number(entry,"flag")!=0) throw new IllegalStateException("已入场记录不能取消预约");
-        if(number(entry,"reservation")!=1) return;
+        if(number(entry,"reservation")!=1){RuntimeEvents.committed("reservation.cancel","SKIPPED",id);return;}
+        RuntimeEvents.committed("reservation.cancel","SUCCESS",id);
         db.update("update enter set reservation=2,update_time=now() where id=? and flag=0 and reservation=1",id);
         release(entry); completeEvent(id); capacity.adjust(entry.get("park_id"),number(entry,"space_id"),1);
     }
@@ -130,17 +139,19 @@ public class ParkingFlowService {
     }
     private void expireLocked(int id) {
         List<Map<String,Object>> initial=db.queryForList("select id,user_id,park_id,space_id from enter where id=?",id);
-        if(initial.isEmpty()) { completeEvent(id); return; }
+        if(initial.isEmpty()) { RuntimeEvents.committed("reservation.expire","SKIPPED",id);completeEvent(id); return; }
         lockUser(number(initial.get(0),"user_id"));
         Map<String,Object> current=one("select id,user_id,park_id,space_id,flag,reservation from enter where id=?",id);
         // Completed historical messages must not lock (or require) a subsequently deleted space.
-        if(number(current,"flag")!=0 || number(current,"reservation")!=1){completeEvent(id);return;}
+        // 已取消、已入场或已到期的旧消息只完成事件，不再访问可能已删除或重新占用的车位。
+        if(number(current,"flag")!=0 || number(current,"reservation")!=1){RuntimeEvents.committed("reservation.expire","SKIPPED",id);completeEvent(id);return;}
         lockPark(number(current,"park_id"));
         Map<String,Object> entry=lockEntry(current);
-        if(number(entry,"flag")!=0 || number(entry,"reservation")!=1) { completeEvent(id); return; }
+        if(number(entry,"flag")!=0 || number(entry,"reservation")!=1) { RuntimeEvents.committed("reservation.expire","SKIPPED",id);completeEvent(id); return; }
         LocalDateTime expiry=time(entry.get("expires_at"));
         if(expiry==null) throw new IllegalStateException("预约缺少到期时间，需人工核对");
         if(now().isBefore(expiry)) throw new IllegalStateException("预约尚未到期");
+        RuntimeEvents.committed("reservation.expire","SUCCESS",id);
         db.update("update enter set reservation=2,update_time=now() where id=? and flag=0 and reservation=1 and expires_at<=?",id,now());
         release(entry); completeEvent(id); capacity.adjust(entry.get("park_id"),number(entry,"space_id"),1);
     }
@@ -162,15 +173,19 @@ public class ParkingFlowService {
                 int original=number(entry,"space_id");
                 // The expired slot is a candidate too. The selected ID cannot exceed it,
                 // so locking selected -> original preserves the global space lock order.
+                // 将原预约位也纳入候选，使新位置 ID 不大于原位置；按 ID 顺序锁定两个车位。
                 int selected=db.queryForObject("select id from spaces where park_id=? and ((spaces_flag=0 and active_enter_id is null) or id=?) order by id limit 1 for update",Integer.class,parkId,original);
                 entry=lockEntry(entry);
                 db.update("update enter set reservation=2,update_time=now() where id=?",entry.get("id")); release(entry); completeEvent(number(entry,"id"));
                 int replacement=insertEntry(user,parkId,selected,1,0,now(),null);
                 occupy(selected,replacement,(String)user.get("user_name"));
+                // 释放原预约并立即分配现场车位在同一事务完成，只迁移桶计数，不重复扣减总余位。
+                RuntimeEvents.committed("vehicle.enter","SUCCESS",replacement);
                 capacity.transfer(parkId,original,selected);
                 return plate;
             } else {
                 entry=lockEntry(entry);
+                RuntimeEvents.committed("vehicle.enter","SUCCESS",entry.get("id"));
                 if(entry.get("space_id")==null || db.queryForObject("select count(*) from spaces where id=? and active_enter_id=?",Integer.class,entry.get("space_id"),entry.get("id"))!=1)
                     throw new IllegalStateException("预约车位关联异常");
                 db.update("update enter set flag=1,enter_time=?,update_time=now() where id=?",now(),entry.get("id")); completeEvent(number(entry,"id")); return plate;
@@ -179,6 +194,7 @@ public class ParkingFlowService {
         List<Integer> free=db.queryForList("select id from spaces where park_id=? and spaces_flag=0 and active_enter_id is null order by id limit 1 for update",Integer.class,parkId);
         if(free.isEmpty()) throw new IllegalStateException("停车场没有可用车位");
         int id=insertEntry(user,parkId,free.get(0),1,0,now(),null);
+        RuntimeEvents.committed("vehicle.enter","SUCCESS",id);
         occupy(free.get(0),id,(String)user.get("user_name")); capacity.adjust(parkId,free.get(0),-1); return plate;
     }
     public String exit(String plate,int parkId) {
@@ -199,6 +215,7 @@ public class ParkingFlowService {
         db.update("update enter set flag=2,update_time=now() where id=? and flag=1",entry.get("id"));
         release(entry);
         db.update("insert into orders(plate_num,user_id,park_id,enter_time,exit_time,parking_duration,moneys,create_time) values(?,?,?,?,?,?,?,?)",plate,uid,parkId,start,end,minutes,fee,end);
+        RuntimeEvents.committed("vehicle.exit","SUCCESS",entry.get("id"));
         capacity.adjust(parkId,number(entry,"space_id"),1);
         return plate;
     }

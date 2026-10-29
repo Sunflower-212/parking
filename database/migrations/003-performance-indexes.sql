@@ -4,6 +4,7 @@ DROP PROCEDURE IF EXISTS parking_add_index;
 DELIMITER $$
 CREATE PROCEDURE parking_add_index(IN tab VARCHAR(64), IN idx VARCHAR(64), IN cols VARCHAR(255))
 BEGIN
+  -- 同时检查索引名和完整列序，重复执行时复用等效索引；列顺序与升降序必须一致。
   IF NOT EXISTS (SELECT 1 FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name=tab AND index_name=idx)
      AND NOT EXISTS (
        SELECT 1 FROM information_schema.statistics
@@ -16,6 +17,7 @@ BEGIN
   END IF;
 END$$
 DELIMITER ;
+-- 分页索引以用户或停车场等值条件开头，时间与 ID 提供稳定倒序；包含式关键词 LIKE 不会因此获得前缀索引加速。
 CALL parking_add_index('orders','idx_orders_user_time','user_id,create_time DESC,id DESC');
 CALL parking_add_index('orders','idx_orders_park_time','park_id,create_time DESC,id DESC');
 CALL parking_add_index('orders','idx_orders_time','create_time DESC,id DESC');

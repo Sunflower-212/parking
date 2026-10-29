@@ -90,12 +90,17 @@ class BackgroundIntegrationTest {
     }
     @Test @EnabledIfEnvironmentVariable(named="PARKING_DOCKER_RECOVERY_TESTS",matches="true")
     void durableQueueSurvivesBrokerRestartAndCoreWritesContinueDuringTheOutage() throws Exception {
-        assertEquals("parking-verification",System.getenv("PARKING_COMPOSE_PROJECT"));
+        assertTrue(Set.of("parking-verification","parking-logging-verification").contains(System.getenv("PARKING_COMPOSE_PROJECT")));
         String suffix=UUID.randomUUID().toString().substring(0,8);int uid=0,park=0,rule=0;
+        String correlation="restart-"+UUID.randomUUID();
         listeners.stop();
         try {
             id=tasks.createExport(UUID.randomUUID().toString(),Map.of("user_name","absent-restart-"+suffix));await("SENT");
             docker("stop");
+            try(var scope=org.zjmproject.observability.RuntimeEvents.scope(correlation)) {
+                new TransactionTemplate(manager).executeWithoutResult(t->tasks.audit("test.broker_outage",List.of(1)));
+            }
+            assertEquals(1,db.queryForObject("select count(*) from background_event where request_id=?",Integer.class,correlation));
             db.update("insert into user(user_name,password,plate_num,create_time,update_time) values(?,'test','京A-12345',now(),now())","br"+suffix);
             uid=db.queryForObject("select id from user where user_name=?",Integer.class,"br"+suffix);
             db.update("insert into rule(rule_name,free_time,charging_unit,unit_cost,create_time,update_time) values(?,0,30,1,now(),now())","br"+suffix);
@@ -116,9 +121,19 @@ class BackgroundIntegrationTest {
             if(uid!=0)db.update("delete from user where id=?",uid);
         }
         await("DONE");assertTrue(Files.isRegularFile(tasks.download(id)));
+        long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(60);
+        while(System.nanoTime()<deadline && db.queryForObject("select count(*) from admin_audit where request_id=?",Integer.class,correlation)==0)Thread.sleep(100);
+        assertEquals(1,db.queryForObject("select count(*) from admin_audit where request_id=?",Integer.class,correlation));
+        String auditId=db.queryForObject("select event_id from admin_audit where request_id=?",String.class,correlation);
+        tasks.consume(auditId);
+        assertEquals(1,db.queryForObject("select count(*) from admin_audit where request_id=?",Integer.class,correlation));
+        db.update("delete from admin_audit where request_id=?",correlation);
+        db.update("delete from background_event where request_id=?",correlation);
     }
     private void docker(String action) throws Exception {
-        var p=new ProcessBuilder("docker",action,"parking-verification-rabbitmq-1").redirectOutput(ProcessBuilder.Redirect.DISCARD).redirectError(ProcessBuilder.Redirect.DISCARD).start();
+        String project=System.getenv("PARKING_COMPOSE_PROJECT");
+        assertTrue(Set.of("parking-verification","parking-logging-verification").contains(project));
+        var p=new ProcessBuilder("docker",action,project+"-rabbitmq-1").redirectOutput(ProcessBuilder.Redirect.DISCARD).redirectError(ProcessBuilder.Redirect.DISCARD).start();
         assertTrue(p.waitFor(30,TimeUnit.SECONDS));assertEquals(0,p.exitValue());
     }
 }
