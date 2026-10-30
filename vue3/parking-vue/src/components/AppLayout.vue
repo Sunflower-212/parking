@@ -61,7 +61,7 @@ const menu = computed(() =>
 )
 const prefix = computed(() => (props.admin ? '/admin/' : '/user/'))
 const title = computed(
-  () => menu.value.find((m) => route.path === prefix.value + m[0])?.[1] || '停车管理',
+  () => route.meta.title || menu.value.find((m) => route.path === prefix.value + m[0])?.[1] || '停车管理',
 )
 async function load() {
   loading.value = true

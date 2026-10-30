@@ -47,7 +47,11 @@ const routes = [
       { path: '/user/rechargeHistory', component: RechargeHistoryVue },
       { path: '/user/info', component: UserInfoVue },
       { path: '/user/account', component: UserAccountVue },
-      { path: '/user/paymentResult', component: () => import('@/views/user/PaymentResult.vue') },
+      {
+        path: '/user/paymentResult',
+        component: () => import('@/views/user/PaymentResult.vue'),
+        meta: { title: '充值结果' },
+      },
       { path: '/user/avatar', component: UserAvatarVue },
       { path: '/user/resetPassword', component: UserResetPasswordVue },
     ],
