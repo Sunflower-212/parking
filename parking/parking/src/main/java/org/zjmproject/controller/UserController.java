@@ -86,7 +86,7 @@ public class UserController {
         //查询用户名密码是否正确
         User loginUser = userService.findByUserName(username);
         if (loginUser == null) {
-            return Result.error("用户不存在...");
+            return Result.error("账号或者密码错误");
         }
 
         if(Md5Util.checkPassword(password,loginUser.getPassword())) {
@@ -104,7 +104,7 @@ public class UserController {
             //登陆成功
             return Result.success(token);
         }
-        return Result.error("密码错误");
+        return Result.error("账号或者密码错误");
     }
 
     //用户详情信息

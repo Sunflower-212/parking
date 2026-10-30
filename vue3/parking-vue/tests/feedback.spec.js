@@ -7,6 +7,8 @@ import {
   localFailure,
   showRequestError,
   safeMessage,
+  failureAlerts,
+  closeFailure,
 } from '../src/utils/request-error-notice'
 const mocks = vi.hoisted(() => ({ removeToken: vi.fn(), removeInfo: vi.fn(), replace: vi.fn() }))
 vi.mock('element-plus', () => ({ ElMessage: vi.fn() }))
@@ -19,10 +21,15 @@ vi.mock('../src/stores/token', () => ({
 vi.mock('../src/stores/userInfo', () => ({ default: () => ({ removeInfo: mocks.removeInfo }) }))
 vi.mock('../src/stores/adminInfo', () => ({ default: () => ({ removeInfo: mocks.removeInfo }) }))
 beforeEach(() => {
+  failureAlerts.value.forEach((alert) => closeFailure(alert.id))
   vi.clearAllMocks()
   vi.stubGlobal('Blob', NodeBlob)
 })
-afterEach(() => vi.unstubAllGlobals())
+afterEach(() => {
+  failureAlerts.value.forEach((alert) => closeFailure(alert.id))
+  vi.unstubAllGlobals()
+  vi.useRealTimers()
+})
 function response(data, status = 200) {
   request.defaults.adapter = async (config) => ({
     data,
@@ -50,23 +57,26 @@ it('uses explicit lifetimes and keeps request ID in native expandable details', 
   expect(ElMessage).toHaveBeenLastCalledWith(
     expect.objectContaining({ type: 'warning', duration: 4000 }),
   )
+  vi.useFakeTimers()
   showRequestError('保存失败', 'feedback-test')
-  const options = ElMessage.mock.lastCall[0]
-  expect(options).toMatchObject({ type: 'error', duration: 6000, showClose: true })
-  expect(options.message.children[1].type).toBe('details')
-  expect(options.message.children[1].props?.open).not.toBe(true)
+  expect(failureAlerts.value).toHaveLength(1)
+  expect(failureAlerts.value[0]).toMatchObject({ message: '保存失败', requestId: 'feedback-test' })
+  vi.advanceTimersByTime(5999)
+  expect(failureAlerts.value).toHaveLength(1)
+  vi.advanceTimersByTime(1)
+  expect(failureAlerts.value).toHaveLength(0)
 })
 it('reports HTTP 200 business errors exactly once, preserving code and request ID', async () => {
   response({ code: 1, message: '车位已被占用' })
   const error = await request.patch('/enter/reservation', { id: 1 }).catch((e) => e)
   expect(error).toMatchObject({ code: 1, message: '车位已被占用', requestId: 'feedback-test' })
   localFailure(error, '预约失败')
-  expect(ElMessage).toHaveBeenCalledTimes(1)
+  expect(failureAlerts.value).toHaveLength(1)
 })
 it.each([403, 409, 503])('reports HTTP %i without clearing the session', async (status) => {
   failure(status)
   await expect(request.get('/test')).rejects.toHaveProperty('response.status', status)
-  expect(ElMessage).toHaveBeenCalledTimes(1)
+  expect(failureAlerts.value).toHaveLength(1)
   expect(mocks.removeToken).not.toHaveBeenCalled()
 })
 it('clears a 401 session and collapses concurrent expiry notices', async () => {
@@ -74,7 +84,7 @@ it('clears a 401 session and collapses concurrent expiry notices', async () => {
   await Promise.allSettled([request.get('/a'), request.get('/b')])
   expect(mocks.removeToken).toHaveBeenCalled()
   expect(mocks.replace).toHaveBeenCalledWith('/login')
-  expect(ElMessage).toHaveBeenCalledTimes(1)
+  expect(failureAlerts.value).toHaveLength(1)
 })
 it.each([
   ['ECONNABORTED', '请求超时'],
@@ -83,18 +93,18 @@ it.each([
   failure(undefined, undefined, code)
   const error = await request.get('/test').catch((e) => e)
   expect(error.message).toContain(message)
-  expect(ElMessage).toHaveBeenCalledTimes(1)
+  expect(failureAlerts.value).toHaveLength(1)
 })
 it('keeps canceled and repeated background failures quiet while allowing manual retry', async () => {
   failure(undefined, undefined, 'ERR_CANCELED')
   await request.get('/test').catch((e) => localFailure(e, '失败'))
-  expect(ElMessage).not.toHaveBeenCalled()
+  expect(failureAlerts.value).toHaveLength(0)
   failure(503)
   for (let i = 0; i < 3; i++)
     await request.get('/poll', { feedback: false }).catch((e) => localFailure(e, '失败'))
-  expect(ElMessage).not.toHaveBeenCalled()
+  expect(failureAlerts.value).toHaveLength(0)
   await request.get('/poll').catch(() => {})
-  expect(ElMessage).toHaveBeenCalledTimes(1)
+  expect(failureAlerts.value).toHaveLength(1)
 })
 it('rejects JSON Blob errors and keeps valid CSV downloads intact', async () => {
   response(
@@ -106,7 +116,7 @@ it('rejects JSON Blob errors and keeps valid CSV downloads intact', async () => 
     'message',
     '文件已过期',
   )
-  expect(ElMessage).toHaveBeenCalledTimes(1)
+  expect(failureAlerts.value).toHaveLength(1)
   const csv = new NodeBlob(['id,name\n1,test'], { type: 'text/csv' })
   response(csv)
   expect((await request.get('/file', { responseType: 'blob' })).data).toBe(csv)
@@ -132,7 +142,5 @@ it('filters backend diagnostics and treats markup as text', async () => {
     expect(safeMessage(text)).toBe('操作失败，请稍后重试')
   expect(safeMessage('密码错误')).toBe('密码错误')
   showRequestError('<img onerror=alert(1)>', 'test-id')
-  const text = ElMessage.mock.lastCall[0].message.children[0]
-  expect(text.children).toBe('<img onerror=alert(1)>')
-  expect(text.props?.innerHTML).toBeUndefined()
+  expect(failureAlerts.value[0].message).toBe('<img onerror=alert(1)>')
 })

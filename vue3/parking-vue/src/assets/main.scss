@@ -10,21 +10,6 @@
   min-width: 0;
   overflow-wrap: anywhere;
 }
-.operation-feedback {
-  min-width: min(360px, calc(100vw - 32px));
-}
-.operation-feedback .el-message__content {
-  flex: 1;
-  line-height: 1.5;
-}
-.feedback-content details {
-  margin-top: 6px;
-  font-size: 12px;
-}
-.feedback-content summary {
-  cursor: pointer;
-  width: fit-content;
-}
 .feedback-details {
   display: grid;
   gap: 6px;

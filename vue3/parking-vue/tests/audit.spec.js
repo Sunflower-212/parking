@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { shallowMount, flushPromises } from '@vue/test-utils'
 import AuditLog from '../src/views/admin/AuditLog.vue'
 import request from '../src/utils/request'
-import { showRequestError } from '../src/utils/request-error-notice'
+import { showRequestError, failureAlerts, closeFailure } from '../src/utils/request-error-notice'
 import { ElMessage } from 'element-plus'
 vi.mock('../src/utils/request', () => ({ default: { get: vi.fn() } }))
 vi.mock('element-plus', () => ({ ElMessage: vi.fn() }))
@@ -29,10 +29,14 @@ const mountAudit = () =>
     },
   })
 beforeEach(() => {
+  failureAlerts.value.forEach((alert) => closeFailure(alert.id))
   vi.clearAllMocks()
   request.get.mockResolvedValue({ data: { total: 0, items: [] } })
 })
-afterEach(() => wrapper?.unmount())
+afterEach(() => {
+  wrapper?.unmount()
+  failureAlerts.value.forEach((alert) => closeFailure(alert.id))
+})
 it('loads bounded audit pagination and search resets the page', async () => {
   wrapper = mountAudit()
   await flushPromises()
@@ -64,24 +68,12 @@ it('does not apply old detail responses and cancels them on close', async () => 
   expect(pending[2].options.signal.aborted).toBe(true)
   expect(wrapper.vm.detail).toBe(null)
 })
-it('copies only the request ID and reports clipboard failures', async () => {
-  const writeText = vi.fn().mockResolvedValue(undefined)
-  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
-  showRequestError('服务异常', 'safe-id')
-  const message = ElMessage.mock.calls[0][0].message
-  await message.children[1].children[1].children[1].props.onClick()
-  expect(writeText).toHaveBeenCalledWith('safe-id')
-  writeText.mockRejectedValueOnce(new Error('denied'))
-  await message.children[1].children[1].children[1].props.onClick()
-  expect(ElMessage).toHaveBeenLastCalledWith(expect.objectContaining({ type: 'warning' }))
-})
-it('ignores invalid correlation IDs and uses text nodes for error messages', () => {
+it('ignores invalid correlation IDs and keeps markup as plain message text', () => {
   showRequestError('服务异常', 'id\nforged')
-  expect(ElMessage).toHaveBeenCalledWith(
-    expect.objectContaining({ type: 'error', message: '服务异常' }),
-  )
+  expect(failureAlerts.value[0].requestId).toBe(null)
   showRequestError('<script>bad</script>', 'safe-id')
-  const content = ElMessage.mock.lastCall[0].message.children[0]
-  expect(content.children).toBe('<script>bad</script>')
-  expect(content.props?.innerHTML).toBeUndefined()
+  expect(failureAlerts.value.at(-1)).toMatchObject({
+    message: '<script>bad</script>',
+    requestId: 'safe-id',
+  })
 })

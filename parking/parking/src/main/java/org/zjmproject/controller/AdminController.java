@@ -38,7 +38,7 @@ public class AdminController {
         var attributes=org.springframework.web.context.request.RequestContextHolder.getRequestAttributes();
         if(loginAdmin!=null && attributes instanceof org.springframework.web.context.request.ServletRequestAttributes a){a.getRequest().setAttribute("log.actorId",loginAdmin.getId());a.getRequest().setAttribute("log.actorRole",loginAdmin.getPermissions());}
         if(loginAdmin==null){
-            return Result.error("管理员不存在...");
+            return Result.error("账号或者密码错误");
         }
         if(Md5Util.checkPassword(password,loginAdmin.getPassword())){
             if (Md5Util.isLegacy(loginAdmin.getPassword())) adminService.updatePassword(password, loginAdmin.getId());
@@ -54,7 +54,7 @@ public class AdminController {
             //登陆成功
             return  Result.success(token);
         }
-        return Result.error("密码错误");
+        return Result.error("账号或者密码错误");
     }
 
     @Transactional

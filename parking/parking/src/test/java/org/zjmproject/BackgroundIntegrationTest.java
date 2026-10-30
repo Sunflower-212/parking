@@ -90,7 +90,7 @@ class BackgroundIntegrationTest {
     }
     @Test @EnabledIfEnvironmentVariable(named="PARKING_DOCKER_RECOVERY_TESTS",matches="true")
     void durableQueueSurvivesBrokerRestartAndCoreWritesContinueDuringTheOutage() throws Exception {
-        assertTrue(Set.of("parking-verification","parking-logging-verification").contains(System.getenv("PARKING_COMPOSE_PROJECT")));
+        assertTrue(Set.of("parking-verification","parking-logging-verification","parking-alert-verification").contains(System.getenv("PARKING_COMPOSE_PROJECT")));
         String suffix=UUID.randomUUID().toString().substring(0,8);int uid=0,park=0,rule=0;
         String correlation="restart-"+UUID.randomUUID();
         listeners.stop();
@@ -132,7 +132,7 @@ class BackgroundIntegrationTest {
     }
     private void docker(String action) throws Exception {
         String project=System.getenv("PARKING_COMPOSE_PROJECT");
-        assertTrue(Set.of("parking-verification","parking-logging-verification").contains(project));
+        assertTrue(Set.of("parking-verification","parking-logging-verification","parking-alert-verification").contains(project));
         var p=new ProcessBuilder("docker",action,project+"-rabbitmq-1").redirectOutput(ProcessBuilder.Redirect.DISCARD).redirectError(ProcessBuilder.Redirect.DISCARD).start();
         assertTrue(p.waitFor(30,TimeUnit.SECONDS));assertEquals(0,p.exitValue());
     }

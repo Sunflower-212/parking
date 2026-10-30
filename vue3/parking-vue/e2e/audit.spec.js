@@ -80,7 +80,7 @@ test('audit load failures expose retry and correlation ID without clearing login
     }),
   )
   await page.goto('/admin/auditLogs')
-  await page.locator('.el-message summary').click()
+  await page.locator('[data-testid=operation-error-alert] summary').click()
   await expect(page.getByText('请求 ID：audit-failure-test')).toBeVisible()
   await expect(page.getByRole('button', { name: '重新加载', exact: true })).toBeVisible()
   await page.unroute('**/api/admin/audit/page*')
