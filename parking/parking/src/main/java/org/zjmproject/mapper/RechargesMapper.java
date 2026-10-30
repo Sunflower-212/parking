@@ -9,12 +9,6 @@ import java.util.List;
 
 @Mapper
 public interface RechargesMapper {
-    @Update("update recharges set flag=2 where flag=0 and create_time<#{before} order by create_time,id limit 500")
-    int expireUnpaid(LocalDateTime before);
-
-    @Update("update recharges set flag=2 where id=#{id} and flag=0")
-    int cancelUnpaid(Integer id);
-
     void add(Recharges recharges);
     List<Recharges> findRechargesByUserId(Integer userId, BigDecimal amounts, LocalDateTime startTime, LocalDateTime endTime);
 

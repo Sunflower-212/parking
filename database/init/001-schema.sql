@@ -139,6 +139,11 @@ create table recharges(
                       pay_method int null comment '支付方式(0-支付宝,1-微信)',
                       pay_no varchar(64) default '' comment '付款订单编号',
                       create_time datetime not null comment '充值时间',
+                      merchant_order_no varchar(64) NULL,
+                      expires_at datetime(3) NULL,
+                      payment_state varchar(16) NOT NULL DEFAULT 'VERIFYING',
+                      cancel_requested boolean NOT NULL DEFAULT false,
+                      UNIQUE KEY uk_recharge_merchant_order(merchant_order_no),
                       pay_time datetime null comment '支付时间',
                       constraint fk_recharges_user foreign key(user_id) references user(id),-- 外键约束
                       check(pay_method in (0,1)),
@@ -209,3 +214,19 @@ END$$
 DELIMITER ;
 CALL parking_normalize_indexes();
 DROP PROCEDURE parking_normalize_indexes;
+
+CREATE TABLE IF NOT EXISTS payment_event (
+  recharge_id int unsigned PRIMARY KEY,
+  version bigint NOT NULL DEFAULT 1,
+  next_run_at datetime(3) NOT NULL,
+  last_checked_at datetime(3) NULL,
+  lease_token varchar(36) NULL,
+  lease_until datetime(3) NULL,
+  attempts int NOT NULL DEFAULT 0,
+  delivered_at datetime(3) NULL,
+  completed_at datetime(3) NULL,
+  last_error varchar(64) NULL,
+  request_id varchar(64) NULL,
+  KEY idx_payment_event_pending(completed_at,recharge_id),
+  FOREIGN KEY(recharge_id) REFERENCES recharges(id) ON DELETE CASCADE
+) ENGINE=InnoDB;

@@ -5,7 +5,7 @@ import uuid
 import os
 
 root = Path(__file__).resolve().parents[1]
-command = ['docker', 'compose', '-p', os.environ.get('PARKING_COMPOSE_PROJECT','parking-verification'), 'exec', '-T', 'mysql', 'sh', '-c',
+command = ['docker', 'compose', '-p', os.environ.get('PARKING_COMPOSE_PROJECT','parking-verification'), '-f', 'compose.test.yml', 'exec', '-T', 'mysql', 'sh', '-c',
            'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec mysql -uroot --default-character-set=utf8mb4 --batch --skip-column-names']
 
 def sql(text, check=True):

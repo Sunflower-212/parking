@@ -6,6 +6,10 @@ import UserAccount from '../src/views/user/UserAccount.vue'
 import request from '../src/utils/request'
 import { failureAlerts, closeFailure } from '../src/utils/request-error-notice'
 vi.mock('element-plus', () => ({ ElMessage: vi.fn() }))
+vi.mock('vue-router', () => ({
+  useRouter: () => ({ replace: vi.fn() }),
+  useRoute: () => ({ query: {} }),
+}))
 vi.mock('../src/utils/request', () => ({
   default: { get: vi.fn(), post: vi.fn(), patch: vi.fn() },
 }))

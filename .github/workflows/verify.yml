@@ -8,7 +8,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Check repository publication policy
-        run: python3 scripts/check-publication.py
+        run: |
+          python3 scripts/check-publication.py
+          python3 scripts/test-cloud-config.py
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -21,7 +23,7 @@ jobs:
       - name: Start isolated verification infrastructure
         run: |
           python3 scripts/init-env.py
-          docker compose -p parking-verification -f compose.yml -f compose.background.yml -f compose.test.yml -f compose.background.test.yml --profile background up -d --wait mysql redis redis-cache rabbitmq
+          docker compose -p parking-verification -f compose.test.yml --profile background up -d --wait mysql redis redis-cache rabbitmq
       - name: Backend and migration tests
         run: |
           set -a
@@ -33,6 +35,7 @@ jobs:
           sh ./mvnw -B verify
           cd ../..
           python3 scripts/test-migration.py
+          python3 scripts/test-payment-migration.py
       - name: Frontend tests and production build
         working-directory: vue3/parking-vue
         run: |
@@ -46,10 +49,10 @@ jobs:
           source .env
           set +a
           export BACKGROUND_TASKS_ENABLED=true
-          docker compose -p parking-verification -f compose.yml -f compose.background.yml -f compose.test.yml -f compose.background.test.yml --profile background up -d --build --wait backend frontend
+          docker compose -p parking-verification -f compose.test.yml --profile background up -d --build --wait backend frontend
           cd vue3/parking-vue
           npx playwright install --with-deps chromium
           npm run test:e2e
       - name: Stop verification services and retain volumes
         if: always()
-        run: docker compose -p parking-verification -f compose.yml -f compose.background.yml -f compose.test.yml -f compose.background.test.yml --profile background down
+        run: docker compose -p parking-verification -f compose.test.yml --profile background down

@@ -68,6 +68,7 @@ parking:
     local-ttl: ${CACHE_LOCAL_TTL:1s}
     local-weight-bytes: ${CACHE_LOCAL_WEIGHT_BYTES:16777216}
   jwt-secret: ${JWT_SECRET}
+  payment-timeout: ${PAYMENT_TIMEOUT:30m}
   reservation-timeout: ${RESERVATION_TIMEOUT:30m}
   upload-dir: ${UPLOAD_DIR:./uploads}
   bootstrap:

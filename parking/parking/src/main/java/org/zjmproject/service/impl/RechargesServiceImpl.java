@@ -66,11 +66,6 @@ public class RechargesServiceImpl implements RechargesService {
     }
 
     @Override
-    public void checkAndUpdateRechargesFlag() {
-        while(rechargesMapper.expireUnpaid(LocalDateTime.now(clock).minusMinutes(5))==500) { /* conditional batches preserve payment race safety */ }
-    }
-
-    @Override
     public List<Recharges> findRechargesListByDate(LocalDate localDate) {
         LocalDateTime startDateTime = localDate.atStartOfDay();
         LocalDateTime endDateTime = localDate.plusDays(1).atStartOfDay();

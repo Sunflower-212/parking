@@ -1,3 +1,5 @@
+import { randomUUID } from './uuid'
+
 export const kind = (cell) => (cell.spaces_flag === 1 ? 0 : cell.spaces_flag)
 export const keyAt = (cell) => `${cell.spaces_row}:${cell.spaces_col}`
 export const editable = (cell) => cell && cell.editable !== false && cell.spaces_flag !== 1
@@ -49,7 +51,7 @@ export function validateDraft(base, rows) {
 }
 export function newCell(row, col, type, name) {
   return {
-    id: `new-${crypto.randomUUID()}`,
+    id: `new-${randomUUID()}`,
     spaces_row: row,
     spaces_col: col,
     spaces_flag: type,

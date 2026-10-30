@@ -29,9 +29,4 @@ public class QuartzConfig {
         userService.checkAndUpdateUserStatus();
     }
 
-    @Scheduled(cron = "0 0/5 * * * ?")
-    public  void checkAndUpdateRechargesFlag(){
-        rechargesService.checkAndUpdateRechargesFlag();
-    }
-
 }

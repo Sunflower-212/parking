@@ -1,11 +1,209 @@
+# Standalone environment; do not stack with another business Compose.
+name: parking-verification
+x-runtime-logging: &id001
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: '3'
 services:
   mysql:
-    ports: ["127.0.0.1:23307:3306"]
+    mem_limit: ${MYSQL_MEMORY_LIMIT:-2g}
+    image: mysql:8.4.4
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Set MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: parking_springboot
+      MYSQL_USER: parking
+      MYSQL_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD}
+      TZ: Asia/Shanghai
+    command:
+    - --character-set-server=utf8mb4
+    - --collation-server=utf8mb4_0900_ai_ci
+    - --innodb-buffer-pool-size=${MYSQL_BUFFER_POOL_SIZE:-1G}
+    - --max-connections=${MYSQL_MAX_CONNECTIONS:-100}
+    - --innodb-lock-wait-timeout=5
+    - --max-execution-time=5000
+    volumes:
+    - mysql-data:/var/lib/mysql
+    - ./database/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test:
+      - CMD-SHELL
+      - MYSQL_PWD=$$MYSQL_PASSWORD mysql -u$$MYSQL_USER -e 'SELECT 1' parking_springboot >/dev/null 2>&1
+      interval: 5s
+      timeout: 4s
+      retries: 40
+    logging: *id001
+    restart: unless-stopped
+    ports:
+    - 127.0.0.1:23307:3306
   redis:
-    ports: ["127.0.0.1:26380:6379"]
+    mem_limit: ${REDIS_STATE_LIMIT:-1536m}
+    image: redis:7.4.2-alpine
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD}
+    command:
+    - sh
+    - -c
+    - exec redis-server --maxmemory ${REDIS_STATE_MEMORY:-512mb} --maxmemory-policy noeviction --appendonly yes --appendfsync everysec --requirepass "$$REDIS_PASSWORD"
+    volumes:
+    - redis-data:/data
+    healthcheck:
+      test:
+      - CMD-SHELL
+      - REDISCLI_AUTH=$$REDIS_PASSWORD redis-cli ping | grep -q PONG
+      interval: 5s
+      timeout: 4s
+      retries: 20
+    logging: *id001
+    restart: unless-stopped
+    ports:
+    - 127.0.0.1:26380:6379
   redis-cache:
-    ports: ["127.0.0.1:26381:6379"]
+    mem_limit: ${REDIS_CACHE_LIMIT:-512m}
+    image: redis:7.4.2-alpine
+    environment:
+      REDIS_PASSWORD: ${CACHE_REDIS_PASSWORD:?Set CACHE_REDIS_PASSWORD}
+    command:
+    - sh
+    - -c
+    - exec redis-server --maxmemory ${REDIS_CACHE_MEMORY:-256mb} --maxmemory-policy allkeys-lfu --save '' --appendonly no --requirepass "$$REDIS_PASSWORD"
+    healthcheck:
+      test:
+      - CMD-SHELL
+      - REDISCLI_AUTH=$$REDIS_PASSWORD redis-cli ping | grep -q PONG
+      interval: 5s
+      timeout: 4s
+      retries: 20
+    logging: *id001
+    restart: unless-stopped
+    ports:
+    - 127.0.0.1:26381:6379
   backend:
-    ports: ["127.0.0.1:28080:8080"]
+    mem_limit: ${BACKEND_MEMORY_LIMIT:-2g}
+    build:
+      context: .
+      dockerfile: deploy/backend.Dockerfile
+    environment:
+      PARKING_LOG_DIR: /app/logs
+      APP_LOG_LEVEL: ${APP_LOG_LEVEL:-INFO}
+      BUSINESS_LOG_LEVEL: ${BUSINESS_LOG_LEVEL:-INFO}
+      REQUEST_LOG_ENABLED: ${REQUEST_LOG_ENABLED:-true}
+      SLOW_REQUEST_MS: ${SLOW_REQUEST_MS:-500}
+      READ_LOG_SAMPLE: ${READ_LOG_SAMPLE:-0.1}
+      LOG_MAX_FILE_SIZE: ${LOG_MAX_FILE_SIZE:-25MB}
+      LOG_HISTORY_DAYS: ${LOG_HISTORY_DAYS:-14}
+      LOG_TOTAL_SIZE_CAP: ${LOG_TOTAL_SIZE_CAP:-1GB}
+      DB_URL: jdbc:mysql://mysql:3306/parking_springboot?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai
+      DB_USER: parking
+      DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD}
+      JAVA_TOOL_OPTIONS: ${JAVA_TOOL_OPTIONS:--XX:MaxRAMPercentage=50 -XX:+ExitOnOutOfMemoryError}
+      DB_POOL_SIZE: ${DB_POOL_SIZE:-20}
+      PARKING_ADMISSION_PERMITS: ${PARKING_ADMISSION_PERMITS:-8}
+      CAPACITY_BUCKETS: ${CAPACITY_BUCKETS:-16}
+      CACHE_ENABLED: 'true'
+      CACHE_LOCAL_ENABLED: ${CACHE_LOCAL_ENABLED:-true}
+      CACHE_LOCAL_TTL: ${CACHE_LOCAL_TTL:-1s}
+      CACHE_LOCAL_WEIGHT_BYTES: ${CACHE_LOCAL_WEIGHT_BYTES:-16777216}
+      CACHE_REDIS_HOST: redis-cache
+      CACHE_REDIS_PASSWORD: ${CACHE_REDIS_PASSWORD:?Set CACHE_REDIS_PASSWORD}
+      REDIS_HOST: redis
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET}
+      PAYMENT_TIMEOUT: ${PAYMENT_TIMEOUT:-30m}
+      RESERVATION_TIMEOUT: ${RESERVATION_TIMEOUT:-30m}
+      BOOTSTRAP_ADMIN_USERNAME: ${BOOTSTRAP_ADMIN_USERNAME:?Set BOOTSTRAP_ADMIN_USERNAME}
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:?Set BOOTSTRAP_ADMIN_PASSWORD}
+      AI_ENABLED: ${AI_ENABLED:-false}
+      AI_AUTOCONFIG_EXCLUDE: ${AI_AUTOCONFIG_EXCLUDE:-org.springframework.ai.autoconfigure.openai.OpenAiAutoConfiguration}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
+      OCR_ENABLED: ${OCR_ENABLED:-false}
+      BAIDU_API_KEY: ${BAIDU_API_KEY:-}
+      BAIDU_SECRET_KEY: ${BAIDU_SECRET_KEY:-}
+      ALIPAY_ENABLED: ${ALIPAY_ENABLED:-false}
+      ALIPAY_APP_ID: ${ALIPAY_APP_ID:-}
+      ALIPAY_PRIVATE_KEY: ${ALIPAY_PRIVATE_KEY:-}
+      ALIPAY_PUBLIC_KEY: ${ALIPAY_PUBLIC_KEY:-}
+      ALIPAY_NOTIFY_URL: ${ALIPAY_NOTIFY_URL:-}
+      ALIPAY_RETURN_URL: ${ALIPAY_RETURN_URL:-}
+      OSS_ENABLED: ${OSS_ENABLED:-false}
+      OSS_ACCESS_KEY_ID: ${OSS_ACCESS_KEY_ID:-}
+      OSS_ACCESS_KEY_SECRET: ${OSS_ACCESS_KEY_SECRET:-}
+      OSS_BUCKET: ${OSS_BUCKET:-}
+      OSS_ENDPOINT: ${OSS_ENDPOINT:-}
+      BACKGROUND_TASKS_ENABLED: ${BACKGROUND_TASKS_ENABLED:-false}
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_USER: ${RABBITMQ_USER:-parking}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD}
+      EXPORT_DIR: /app/exports
+    volumes:
+    - backend-logs:/app/logs
+    - export-data:/app/exports
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+      - CMD
+      - curl
+      - --fail
+      - --silent
+      - http://localhost:8080/actuator/health
+      interval: 10s
+      timeout: 5s
+      start_period: 40s
+      retries: 12
+    logging: *id001
+    restart: unless-stopped
+    ports:
+    - 127.0.0.1:28080:8080
   frontend:
-    ports: !override ["127.0.0.1:28088:80"]
+    mem_limit: ${FRONTEND_MEMORY_LIMIT:-256m}
+    build:
+      context: .
+      dockerfile: deploy/frontend.Dockerfile
+    ports:
+    - 127.0.0.1:28088:80
+    depends_on:
+      backend:
+        condition: service_healthy
+    logging: *id001
+    restart: unless-stopped
+  rabbitmq:
+    profiles:
+    - background
+    image: rabbitmq:4.1.4-management@sha256:294b01e1796a8acede4619f32a1c394fae1f8021e57986ea01aad38dc2a4f502
+    hostname: parking-rabbitmq
+    mem_limit: ${RABBITMQ_MEMORY_LIMIT:-512m}
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-parking}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD}
+      RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS: -rabbit vm_memory_high_watermark 0.6 disk_free_limit 536870912
+    ports:
+    - 127.0.0.1:25672:5672
+    - 127.0.0.1:25673:15672
+    volumes:
+    - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test:
+      - CMD
+      - rabbitmq-diagnostics
+      - -q
+      - ping
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+    restart: unless-stopped
+volumes:
+  backend-logs: null
+  mysql-data: null
+  redis-data: null
+  rabbitmq-data: null
+  export-data: null

@@ -9,7 +9,17 @@ const baseState = computed(
   () =>
     ({
       entry: { 0: ['待入场', 'warning'], 1: ['在场', 'success'], 2: ['已离场', 'info'] },
-      payment: { 0: ['未支付', 'warning'], 1: ['支付成功', 'success'], 2: ['已取消', 'info'] },
+      payment: {
+        PENDING: ['待支付', 'warning'],
+        VERIFYING: ['核验中', 'warning'],
+        CLOSING: ['关单中', 'warning'],
+        PAID: ['已到账', 'success'],
+        CLOSED: ['已关闭', 'info'],
+        REVIEW: ['待核验', 'warning'],
+        0: ['未支付', 'warning'],
+        1: ['支付成功', 'success'],
+        2: ['已取消', 'info'],
+      },
       member: { 0: ['普通用户', 'info'], 1: ['会员', 'success'] },
       role: { 0: ['停车场管理员', 'info'], 1: ['超级管理员', 'primary'] },
       space: {

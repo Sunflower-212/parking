@@ -1,4 +1,5 @@
 import axios from 'axios'
+import { rememberPaymentReturn } from './payment-context'
 import { showRequestError, markHandled, safeMessage } from './request-error-notice'
 import router from '@/router'
 import { useTokenStore } from '@/stores/token'
@@ -6,7 +7,9 @@ import useUserInfoStore from '@/stores/userInfo'
 import useAdminInfoStore from '@/stores/adminInfo'
 import { httpErrorMessage } from './http-errors'
 
-export const baseURL = (import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/$/, '')
+export const baseURL = (
+  import.meta.env.VITE_API_BASE_URL || `${import.meta.env.BASE_URL}api`
+).replace(/\/$/, '')
 let unauthorizedShown = false
 const request = axios.create({ baseURL, timeout: 30000 })
 async function decodeBlob(data, contentType) {
@@ -53,6 +56,8 @@ request.interceptors.response.use(
     error.message = safeMessage(httpErrorMessage(error))
     error.requestId = error.response?.headers?.['x-request-id']
     if (error?.response?.status === 401) {
+      if (router.currentRoute.value.path === '/user/paymentResult')
+        rememberPaymentReturn(router.currentRoute.value.query)
       useTokenStore().removeToken()
       useUserInfoStore().removeInfo()
       useAdminInfoStore().removeInfo()

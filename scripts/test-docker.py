@@ -14,7 +14,7 @@ env = dict(line.split('=', 1) for line in (root / '.env').read_text(encoding='ut
 project = os.environ.get('PARKING_COMPOSE_PROJECT', 'parking')
 if project not in ('parking', 'parking-verification'):
     raise SystemExit('Smoke tests support only parking or parking-verification')
-compose_files = ['-f', 'compose.yml', '-f', 'compose.test.yml' if project == 'parking-verification' else 'compose.dev.yml']
+compose_files = ['-f', 'compose.test.yml' if project == 'parking-verification' else 'compose.dev.yml']
 base = 'http://127.0.0.1:' + ('28088' if project == 'parking-verification' else env.get('HTTP_PORT', '8088'))
 prefix = 'sm' + uuid.uuid4().hex[:8]
 

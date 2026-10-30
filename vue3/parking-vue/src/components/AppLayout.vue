@@ -10,6 +10,7 @@ import { useTokenStore } from '@/stores/token'
 import useAdmin from '@/stores/adminInfo'
 import useUser from '@/stores/userInfo'
 import { roleName } from '@/utils/format'
+import StatusTag from '@/components/StatusTag.vue'
 const props = defineProps({ admin: Boolean })
 const route = useRoute(),
   router = useRouter(),
@@ -139,9 +140,10 @@ onMounted(load)
           >
         </div>
         <div class="profile">
-          <el-tag size="small">{{ roleName(role) }}</el-tag
-          ><span>{{ info.admin_name || info.user_name || '加载中' }}</span
-          ><el-button text :icon="SwitchButton" aria-label="退出登录" @click="logout" />
+          <el-tag v-if="admin" size="small">{{ roleName(role) }}</el-tag>
+          <StatusTag v-else :value="info.status ?? 0" kind="member" size="small" />
+          <span>{{ info.admin_name || info.user_name || '加载中' }}</span>
+          <el-button text :icon="SwitchButton" aria-label="退出登录" @click="logout" />
         </div>
       </header>
       <main class="main-content">

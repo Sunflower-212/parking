@@ -1,4 +1,6 @@
 <script setup>
+import { useRouter } from 'vue-router'
+import { paymentPath } from '@/utils/payment-context'
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { jwtDecode } from 'jwt-decode'
 import { ElMessageBox } from 'element-plus'
@@ -13,6 +15,7 @@ import { usePagedQuery } from '@/composables/usePagedQuery'
 import { useTokenStore } from '@/stores/token'
 import request from '@/utils/request'
 import { dateTime, money, cleanQuery } from '@/utils/format'
+const paymentRouter = useRouter()
 const props = defineProps({ page: { type: String, required: true } }),
   config = pages[props.page]
 const role = jwtDecode(useTokenStore().token).claims.permissions
@@ -205,7 +208,7 @@ onBeforeUnmount(() => {
         ><template #default="{ row }"
           ><StatusTag
             v-if="col.kind"
-            :value="row[col.key]"
+            :value="col.kind === 'payment' ? row.payment_state || row[col.key] : row[col.key]"
             :kind="col.kind"
             :reservation="col.kind === 'entry' ? row.reservation : undefined"
           /><span v-else>{{
@@ -217,12 +220,21 @@ onBeforeUnmount(() => {
           }}</span></template
         ></el-table-column
       ><el-table-column
-        v-if="(config.update || config.remove || config.reset) && canEdit"
+        v-if="
+          ((config.update || config.remove || config.reset) && canEdit) || page === 'userRecharges'
+        "
         label="操作"
         :min-width="config.reset ? 170 : 130"
         fixed="right"
-        ><template #default="{ row }"
-          ><el-button
+        ><template #default="{ row }">
+          <el-button
+            v-if="page === 'userRecharges' && row.flag !== 1 && row.payment_state !== 'CLOSED'"
+            link
+            type="primary"
+            @click="paymentRouter.push(paymentPath(row.id))"
+            >核验到账</el-button
+          >
+          <el-button
             v-if="config.update"
             link
             type="primary"

@@ -55,6 +55,8 @@
         <result property="amounts" column="amounts"/>
         <result property="pay_no" column="pay_no"/>
         <result property="flag" column="flag"/>
+        <result property="payment_state" column="payment_state"/>
+        <result property="expires_at" column="expires_at"/>
         <result property="create_time" column="create_time"/>
         <result property="user_name" column="user_name"/>
     </resultMap>

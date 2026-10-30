@@ -1,0 +1,25 @@
+name: web-entry
+services:
+  gateway:
+    image: nginx:1.28.0-alpine
+    mem_limit: 64m
+    ports:
+      - "${GATEWAY_BIND:-0.0.0.0}:${GATEWAY_HTTP_PORT:-80}:80"
+      - "${GATEWAY_BIND:-0.0.0.0}:${GATEWAY_HTTPS_PORT:-443}:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro,Z
+      - ./servers:/etc/nginx/servers:ro,Z
+      - ./routes:/etc/nginx/routes:ro,Z
+      - ./certs:/etc/nginx/certs:ro,Z
+    networks: [web-entry]
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  web-entry:
+    external: true
+    name: ${PARKING_ENTRY_NETWORK:-web-entry}

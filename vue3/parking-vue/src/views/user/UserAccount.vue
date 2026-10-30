@@ -2,11 +2,16 @@
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { feedback as ElMessage, localFailure } from '@/utils/request-error-notice'
 import DOMPurify from 'dompurify'
+import { useRouter, useRoute } from 'vue-router'
+import { rechargeId, paymentPath, rememberPayment } from '@/utils/payment-context'
 import request from '@/utils/request'
 import useUser from '@/stores/userInfo'
 import PageShell from '@/components/PageShell.vue'
 import StatusTag from '@/components/StatusTag.vue'
 import { money, dateTime } from '@/utils/format'
+const router = useRouter(),
+  route = useRoute()
+const paying = ref(false)
 const store = useUser(),
   info = computed(() => store.info),
   busy = ref(false),
@@ -20,24 +25,36 @@ const store = useUser(),
   dialog = ref(false),
   formContainer = ref()
 let disposed = false,
-  refreshing = false
-async function refresh(silent = false) {
-  if (refreshing) return
+  refreshing = false,
+  refreshVersion = 0,
+  refreshController
+async function refresh(silent = false, force = false) {
+  if (disposed || (refreshing && !force)) return false
+  const version = ++refreshVersion
+  refreshController?.abort()
+  const controller = new AbortController()
+  refreshController = controller
   refreshing = true
   loading.value = true
   try {
-    const result = await request.get('/user/userInfo', { feedback: !silent })
-    if (!disposed) {
-      store.setInfo(result.data)
-      accountError.value = ''
-    }
+    const result = await request.get('/user/userInfo', {
+      feedback: !silent,
+      signal: controller.signal,
+    })
+    if (disposed || version !== refreshVersion) return false
+    store.setInfo(result.data)
+    accountError.value = ''
     return true
   } catch {
-    if (!disposed) accountError.value = '账户刷新失败，请重试'
+    if (!disposed && version === refreshVersion && !controller.signal.aborted)
+      accountError.value = '账户刷新失败，请重试'
     return false
   } finally {
-    refreshing = false
-    loading.value = false
+    if (!disposed && version === refreshVersion) {
+      refreshing = false
+      refreshController = undefined
+      loading.value = false
+    }
   }
 }
 async function membership() {
@@ -49,8 +66,8 @@ async function membership() {
       renew ? '/user/vipRenewal' : '/user/getVip',
       new URLSearchParams({ days: days.value }),
     )
-    // 会员变更成功后重新获取服务端账户信息，避免余额或会员标签继续显示旧状态。
-    const refreshed = await refresh(true)
+    // 写入后废弃旧账户请求，防止续期前的慢响应覆盖最新会员状态。
+    const refreshed = await refresh(true, true)
     refreshed
       ? ElMessage.success('会员信息已更新')
       : ElMessage.warning('会员信息已更新，账户刷新失败，请重试')
@@ -91,10 +108,13 @@ function pay() {
       ElMessage.error('支付地址无效')
       return
     }
-    form.target = '_blank'
-    form.rel = 'noopener'
+    if (paying.value) return
+    rememberPayment(info.value.id, payment.value)
+    form.target = '_self'
+    paying.value = true
     form.submit()
   } catch (error) {
+    paying.value = false
     localFailure(error, '支付页面不可用，请刷新充值单')
   }
 }
@@ -102,12 +122,18 @@ async function cancel() {
   if (busy.value) return
   busy.value = true
   try {
-    await request.post(
+    const result = await request.post(
       '/user/cancelRecharges',
       new URLSearchParams({ rechargesId: payment.value.rechargeId }),
     )
     dialog.value = false
-    ElMessage.info('支付已取消')
+    ElMessage.info(
+      result.data?.paymentState === 'PAID'
+        ? '充值已到账'
+        : result.data?.paymentState === 'CLOSED'
+          ? '充值单已关闭'
+          : '已提交取消，正在核验支付状态',
+    )
   } catch {
   } finally {
     busy.value = false
@@ -118,6 +144,11 @@ function focus() {
   if (!document.hidden) refresh(true)
 }
 onMounted(async () => {
+  const returned = rechargeId(route?.query)
+  if (returned) {
+    router?.replace(paymentPath(returned))
+    return
+  }
   refresh()
   try {
     capabilities.value = (await request.get('/system/capabilities')).data
@@ -127,6 +158,8 @@ onMounted(async () => {
 })
 onBeforeUnmount(() => {
   disposed = true
+  refreshVersion++
+  refreshController?.abort()
   window.removeEventListener('focus', focus)
   document.removeEventListener('visibilitychange', focus)
 })
@@ -155,6 +188,7 @@ onBeforeUnmount(() => {
             ><el-input-number
               v-model="amount"
               :min="0.01"
+              :step="0.01"
               :max="1000000"
               :precision="2" /></el-form-item
           ><el-button
@@ -190,11 +224,13 @@ onBeforeUnmount(() => {
       :close-on-click-modal="false"
       @closed="refresh"
       ><p>充值金额：{{ money(payment?.reAmounts) }}</p>
-      <p class="muted">支付完成后请刷新账户，最终支付状态以回调确认为准。</p>
+      <p class="muted">支付后将自动核验到账。</p>
       <div ref="formContainer" v-html="paymentHtml" style="display: none" />
       <template #footer
         ><el-button @click="cancel" :loading="busy">取消支付</el-button
-        ><el-button type="primary" @click="pay">前往支付宝沙箱</el-button></template
+        ><el-button type="primary" :loading="paying" @click="pay"
+          >前往支付宝沙箱</el-button
+        ></template
       ></el-dialog
     ></PageShell
   >

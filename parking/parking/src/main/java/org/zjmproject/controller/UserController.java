@@ -268,24 +268,32 @@ public class UserController {
     public Result vipRenewal(@RequestParam Integer days) {membership.change(AccessGuard.userId(),days,true);return Result.success();}
 
     //充值
-    @Transactional
     @PostMapping("/recharge")
     public Result recharge(@RequestParam BigDecimal amounts,@RequestParam Integer pay_method) throws Exception {
         return Result.success(payments.create(AccessGuard.userId(),amounts,pay_method));
     }
 
     //取消充值
-    @Transactional
     @PostMapping("cancelRecharges")
     public Result cancelRecharges(@RequestParam Integer rechargesId) {
-        payments.cancel(AccessGuard.userId(),rechargesId); return Result.success();
+        return Result.success(payments.cancel(AccessGuard.userId(),rechargesId));
     }
     //充值成功，接收支付宝发送的数据
-    @PostMapping("/rechargeNotify")
-    public String rechargeNotify(HttpServletRequest request) throws Exception {
-        Map<String,String> params=aliPayService.rechargePayNotify(request);
-        if(params==null) return "failure";
-        payments.confirm(params); return "success";
+    @GetMapping("/recharge/{id}/status")
+    public Result<?> rechargeStatus(@PathVariable int id) {return Result.success(payments.status(AccessGuard.userId(),id));}
+    @PostMapping("/recharge/{id}/check")
+    public Result<?> checkRecharge(@PathVariable int id) {return Result.success(payments.check(AccessGuard.userId(),id));}
+    @PostMapping(value="/rechargeNotify",produces="text/plain;charset=UTF-8")
+    public String rechargeNotify(HttpServletRequest request) {
+        try {
+            Map<String,String> params=aliPayService.rechargePayNotify(request);
+            if(params==null) {org.zjmproject.observability.RuntimeEvents.event("payment.notify","SIGNATURE_REJECTED",null);return "failure";}
+            payments.confirm(params);return "success";
+        } catch(Exception e) {
+            org.slf4j.LoggerFactory.getLogger(UserController.class).atWarn().addKeyValue("event","payment.notify")
+                .addKeyValue("result","FAILURE").addKeyValue("reasonCode",e.getClass().getSimpleName()).log("payment_notify_failed");
+            return "failure";
+        }
     }
 
     @PostMapping("/upload")

@@ -1,80 +1,79 @@
 package org.zjmproject.service.impl;
 
-import com.alipay.api.AlipayApiException;
-import com.alipay.api.AlipayClient;
-import com.alipay.api.DefaultAlipayClient;
+import com.alipay.api.*;
 import com.alipay.api.internal.util.AlipaySignature;
-import com.alipay.api.request.AlipayTradePagePayRequest;
+import com.alipay.api.request.*;
 import jakarta.servlet.http.HttpServletRequest;
-import org.json.JSONException;
 import org.json.JSONObject;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.zjmproject.config.AliPayConfig;
 import org.zjmproject.mapper.RechargesMapper;
 import org.zjmproject.pojo.FormContent;
-import org.zjmproject.pojo.Recharges;
 import org.zjmproject.service.AliPayService;
-
-import java.util.HashMap;
-import java.util.Map;
-
+import org.zjmproject.service.PaymentTrade;
+import java.math.BigDecimal;
+import java.time.*;
+import java.time.format.DateTimeFormatter;
+import java.util.*;
 
 @Service
 public class AliPayServiceImpl implements AliPayService {
-
-    private static final String GATEWAY_URL = "https://openapi-sandbox.dl.alipaydev.com/gateway.do";
-    private static final String FORMAT = "JSON";
-    private static final String CHARSET = "UTF-8";
-    private static final String SIGN_TYPE = "RSA2";
-
-    @Autowired
-    private AliPayConfig aliPayConfig;
-
-    @Autowired
-    private RechargesMapper rechargesMapper;
-
-
-    @Override
-    public FormContent<String> pay(Integer rechargesId) throws JSONException{
-        Recharges recharges = rechargesMapper.findRechargesById(rechargesId);
-        if(recharges.getFlag()!=0){
-            throw new RuntimeException("Recharge is not available.");
-        }
-        //1创建Client,通过SDK提供的Client，负责调用支付宝的API
-        AlipayClient alipayClient = new DefaultAlipayClient(GATEWAY_URL,aliPayConfig.getAppId(),
-                aliPayConfig.getAppPrivateKey(),FORMAT,CHARSET, aliPayConfig.getAlipayPublicKey(),SIGN_TYPE);
-        //创建Request并设置Request参数
-        AlipayTradePagePayRequest request = new AlipayTradePagePayRequest();//发送请求的Request类
-        request.setNotifyUrl(aliPayConfig.getNotifyUrl());
-        JSONObject bizContent = new JSONObject();
-        bizContent.put("out_trade_no",recharges.getId());//充值id
-        bizContent.put("total_amount",recharges.getAmounts());//金额
-        bizContent.put("subject","余额充值");//支付名称
-        bizContent.put("product_code","FAST_INSTANT_TRADE_PAY");//固定配置
-
-        request.setBizContent(bizContent.toString());
-        request.setNotifyUrl(aliPayConfig.getNotifyUrl());//设置回调接口
-        request.setReturnUrl(aliPayConfig.getReturnUrl());//设置支付后跳转的页面
-
-
-        //执行请求，拿到响应数据，返回给浏览器
-        String form = "";
-        try{
-            form = alipayClient.pageExecute(request).getBody();
-            // 将表单内容和内容类型封装到FormContent对象中
-            FormContent<String> formContent = new FormContent<>(form, "text/html;charset=" + CHARSET,recharges.getAmounts(),recharges.getId(),"余额充值");
-            return formContent;
-        } catch (AlipayApiException e) {
-            throw new RuntimeException(e);
-        }
+    private static final String GATEWAY = "https://openapi-sandbox.dl.alipaydev.com/gateway.do";
+    @Autowired private AliPayConfig config;
+    @Autowired private RechargesMapper recharges;
+    protected AlipayClient client() {
+        var client=new DefaultAlipayClient(GATEWAY,config.getAppId(),config.getAppPrivateKey(),
+                "JSON","UTF-8",config.getAlipayPublicKey(),"RSA2");
+        client.setConnectTimeout(3000); client.setReadTimeout(5000);
+        return client;
     }
-    @Override
-    public Map<String, String> rechargePayNotify(HttpServletRequest request) throws AlipayApiException {
-        if(!java.util.Set.of("TRADE_SUCCESS","TRADE_FINISHED").contains(request.getParameter("trade_status")==null?"":request.getParameter("trade_status"))) return null;
+    @Override public FormContent<String> pay(Integer id) {
+        var charge=recharges.findRechargesById(id);
+        if(charge==null || charge.getFlag()!=0 || !"PENDING".equals(charge.getPayment_state()))
+            throw new IllegalStateException("充值单不可支付，请重新创建");
+        var content=new JSONObject();
+        content.put("out_trade_no",charge.getMerchant_order_no());
+        content.put("total_amount",charge.getAmounts());
+        content.put("subject","余额充值"); content.put("product_code","FAST_INSTANT_TRADE_PAY");
+        content.put("time_expire",charge.getExpires_at().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
+        var request=new AlipayTradePagePayRequest(); request.setBizContent(content.toString());
+        request.setNotifyUrl(config.getNotifyUrl());
+        // The internal ID is navigation context only; ownership and payment facts are checked server-side.
+        request.setReturnUrl(config.getReturnUrl()+(config.getReturnUrl().contains("?")?"&":"?")+"rechargeId="+id);
+        try {
+            var result=new FormContent<>(client().pageExecute(request).getBody(),"text/html;charset=UTF-8",charge.getAmounts(),id,"余额充值");
+            result.setMerchantOrderNo(charge.getMerchant_order_no()); result.setExpiresAt(charge.getExpires_at());
+            return result;
+        } catch(AlipayApiException e) { throw new IllegalStateException("生成支付页面失败，请稍后重试"); }
+    }
+    @Override public Map<String,String> rechargePayNotify(HttpServletRequest request) throws AlipayApiException {
         Map<String,String> params=new HashMap<>();
-        request.getParameterMap().forEach((name,values)->{if(values.length!=1) throw new IllegalArgumentException("重复的支付参数");params.put(name,values[0]);});
-        if(aliPayConfig.getAlipayPublicKey()==null || aliPayConfig.getAlipayPublicKey().isBlank()) return null;
-        return AlipaySignature.rsaCheckV1(params,aliPayConfig.getAlipayPublicKey(),CHARSET,SIGN_TYPE)?params:null;
+        for(var entry:request.getParameterMap().entrySet()) {
+            if(entry.getValue().length!=1) return null;
+            params.put(entry.getKey(),entry.getValue()[0]);
+        }
+        if(config.getAlipayPublicKey()==null || config.getAlipayPublicKey().isBlank()) return null;
+        return AlipaySignature.rsaCheckV1(params,config.getAlipayPublicKey(),"UTF-8","RSA2")?params:null;
+    }
+    @Override public PaymentTrade query(String orderNo) throws AlipayApiException {
+        var request=new AlipayTradeQueryRequest();
+        request.setBizContent(new JSONObject().put("out_trade_no",orderNo).toString());
+        var result=client().execute(request);
+        if(!result.isSuccess()) {
+            if("ACQ.TRADE_NOT_EXIST".equals(result.getSubCode())) return new PaymentTrade(orderNo,null,"NOT_FOUND",null,null);
+            throw new AlipayApiException("PAYMENT_QUERY_FAILED");
+        }
+        return new PaymentTrade(result.getOutTradeNo(),result.getTradeNo(),result.getTradeStatus(),
+                result.getTotalAmount()==null?null:new BigDecimal(result.getTotalAmount()),
+                result.getSendPayDate()==null?null:LocalDateTime.ofInstant(result.getSendPayDate().toInstant(),ZoneId.of("Asia/Shanghai")));
+    }
+    @Override public boolean close(String orderNo) throws AlipayApiException {
+        var request=new AlipayTradeCloseRequest();
+        request.setBizContent(new JSONObject().put("out_trade_no",orderNo).toString());
+        var result=client().execute(request);
+        if(result.isSuccess()) return true;
+        if(Set.of("ACQ.TRADE_NOT_EXIST","ACQ.TRADE_HAS_SUCCESS","ACQ.TRADE_STATUS_ERROR").contains(Objects.toString(result.getSubCode(),""))) return false;
+        throw new AlipayApiException("PAYMENT_CLOSE_FAILED");
     }
 }

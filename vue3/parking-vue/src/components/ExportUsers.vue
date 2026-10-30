@@ -5,6 +5,7 @@ import { feedback as ElMessage, localFailure } from '@/utils/request-error-notic
 import { useTokenStore } from '@/stores/token'
 import request from '@/utils/request'
 import { cleanQuery } from '@/utils/format'
+import { randomUUID } from '@/utils/uuid'
 const props = defineProps({ filters: { type: Object, required: true } })
 // 按用户隔离当前标签页的任务记录，刷新或离开页面后可恢复自己的导出状态。
 const storageKey = `parking-export:${jwtDecode(useTokenStore().token).claims.id}`
@@ -120,7 +121,7 @@ async function create() {
       return
     }
     // 请求结果不确定时复用同一幂等键与筛选快照，防止重试创建第二个任务或改变第一次请求含义。
-    requestKey ||= crypto.randomUUID()
+    requestKey ||= randomUUID()
     requestFilters ||= cleanQuery({ ...props.filters })
     sessionStorage.setItem(
       storageKey + ':pending',

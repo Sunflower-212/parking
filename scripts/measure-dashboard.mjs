@@ -5,7 +5,7 @@ import { execFileSync } from 'node:child_process'
 const require = createRequire(new URL('../vue3/parking-vue/package.json', import.meta.url))
 const { chromium } = require('@playwright/test')
 const env = Object.fromEntries(readFileSync('.env', 'utf8').split(/\r?\n/).filter(line => line && !line.startsWith('#') && line.includes('=')).map(line => [line.slice(0, line.indexOf('=')), line.slice(line.indexOf('=') + 1)]))
-const compose = ['compose', '-p', 'parking-verification', '-f', 'compose.yml', '-f', 'compose.test.yml']
+const compose = ['compose', '-p', 'parking-verification', '-f', 'compose.test.yml']
 function snapshot() {
   const input = "SELECT DIGEST,DIGEST_TEXT,COUNT_STAR FROM performance_schema.events_statements_summary_by_digest WHERE SCHEMA_NAME='parking_springboot' AND DIGEST_TEXT LIKE 'SELECT %';"
   const output = execFileSync('docker', [...compose, 'exec', '-T', 'mysql', 'sh', '-c', 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql -uroot --batch --raw --skip-column-names parking_springboot'], { input, encoding: 'utf8' })

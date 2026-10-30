@@ -3,6 +3,7 @@ import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { feedback as ElMessage, localFailure } from '@/utils/request-error-notice'
 import { useTokenStore } from '@/stores/token'
+import { consumePaymentReturn } from '@/utils/payment-context'
 import { loginService, userRegisterService } from '@/api/user'
 const router = useRouter(),
   token = useTokenStore(),
@@ -42,7 +43,7 @@ async function submit() {
       const result = await loginService(data.value, role.value)
       token.setToken(result.data, remember.value)
       ElMessage.success('登录成功')
-      router.replace(role.value === '1' ? '/user' : '/admin')
+      router.replace(role.value === '1' ? consumePaymentReturn() || '/user' : '/admin')
     }
   } catch (error) {
     localFailure(error, '操作未完成，请重试')

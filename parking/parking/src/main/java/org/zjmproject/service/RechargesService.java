@@ -23,7 +23,7 @@ public interface RechargesService {
 
     void updateRecharges(Recharges recharges);
 
-    void checkAndUpdateRechargesFlag();
+
 
     List<Recharges> findRechargesListByDate(LocalDate localDate);
 }

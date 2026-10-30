@@ -1,0 +1,227 @@
+# Standalone cloud configuration: all integrations enabled, credentials stay in .env.
+name: parking
+x-runtime-logging: &id001
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: '3'
+services:
+  mysql:
+    mem_limit: 512m
+    image: mysql:8.4.4
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Set MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: parking_springboot
+      MYSQL_USER: parking
+      MYSQL_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD}
+      TZ: Asia/Shanghai
+    command:
+    - --character-set-server=utf8mb4
+    - --collation-server=utf8mb4_0900_ai_ci
+    - --innodb-buffer-pool-size=128M
+    - --max-connections=30
+    - --table-open-cache=256
+    - --table-definition-cache=256
+    - --tmp-table-size=8M
+    - --max-heap-table-size=8M
+    - --temptable-max-ram=32M
+    - --innodb-log-buffer-size=8M
+    - --innodb-lock-wait-timeout=5
+    - --max-execution-time=5000
+    volumes:
+    - mysql-data:/var/lib/mysql
+    - ./database/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test:
+      - CMD-SHELL
+      - MYSQL_PWD=$$MYSQL_PASSWORD mysql -u$$MYSQL_USER -e 'SELECT 1' parking_springboot >/dev/null 2>&1
+      interval: 5s
+      timeout: 4s
+      retries: 40
+    logging: *id001
+    restart: unless-stopped
+  redis:
+    mem_limit: 128m
+    image: redis:7.4.2-alpine
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD}
+    command:
+    - sh
+    - -c
+    - exec redis-server --maxmemory 32mb --maxmemory-policy noeviction --appendonly yes --appendfsync everysec --requirepass "$$REDIS_PASSWORD"
+    volumes:
+    - redis-data:/data
+    healthcheck:
+      test:
+      - CMD-SHELL
+      - REDISCLI_AUTH=$$REDIS_PASSWORD redis-cli ping | grep -q PONG
+      interval: 5s
+      timeout: 4s
+      retries: 20
+    logging: *id001
+    restart: unless-stopped
+  redis-cache:
+    mem_limit: 64m
+    image: redis:7.4.2-alpine
+    environment:
+      REDIS_PASSWORD: ${CACHE_REDIS_PASSWORD:?Set CACHE_REDIS_PASSWORD}
+    command:
+    - sh
+    - -c
+    - exec redis-server --maxmemory 16mb --maxmemory-policy allkeys-lfu --save '' --appendonly no --requirepass "$$REDIS_PASSWORD"
+    healthcheck:
+      test:
+      - CMD-SHELL
+      - REDISCLI_AUTH=$$REDIS_PASSWORD redis-cli ping | grep -q PONG
+      interval: 5s
+      timeout: 4s
+      retries: 20
+    logging: *id001
+    restart: unless-stopped
+  backend:
+    mem_limit: 640m
+    environment:
+      PARKING_LOG_DIR: /app/logs
+      APP_LOG_LEVEL: ${APP_LOG_LEVEL:-INFO}
+      BUSINESS_LOG_LEVEL: ${BUSINESS_LOG_LEVEL:-INFO}
+      REQUEST_LOG_ENABLED: ${REQUEST_LOG_ENABLED:-true}
+      SLOW_REQUEST_MS: ${SLOW_REQUEST_MS:-500}
+      READ_LOG_SAMPLE: ${READ_LOG_SAMPLE:-0.1}
+      LOG_MAX_FILE_SIZE: 10MB
+      LOG_HISTORY_DAYS: '7'
+      LOG_TOTAL_SIZE_CAP: 200MB
+      DB_URL: jdbc:mysql://mysql:3306/parking_springboot?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai
+      DB_USER: parking
+      DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD}
+      JAVA_TOOL_OPTIONS: -Xms128m -Xmx320m -XX:MaxDirectMemorySize=64m -XX:ActiveProcessorCount=2 -XX:+ExitOnOutOfMemoryError -Dio.netty.eventLoopThreads=2
+      DB_POOL_SIZE: '6'
+      PARKING_ADMISSION_PERMITS: '2'
+      CAPACITY_BUCKETS: ${CAPACITY_BUCKETS:-16}
+      CACHE_ENABLED: 'true'
+      CACHE_LOCAL_ENABLED: ${CACHE_LOCAL_ENABLED:-true}
+      CACHE_LOCAL_TTL: ${CACHE_LOCAL_TTL:-1s}
+      CACHE_LOCAL_WEIGHT_BYTES: '4194304'
+      CACHE_REDIS_HOST: redis-cache
+      CACHE_REDIS_PASSWORD: ${CACHE_REDIS_PASSWORD:?Set CACHE_REDIS_PASSWORD}
+      REDIS_HOST: redis
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET}
+      PAYMENT_TIMEOUT: ${PAYMENT_TIMEOUT:-30m}
+      RESERVATION_TIMEOUT: ${RESERVATION_TIMEOUT:-30m}
+      BOOTSTRAP_ADMIN_USERNAME: ${BOOTSTRAP_ADMIN_USERNAME:?Set BOOTSTRAP_ADMIN_USERNAME}
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:?Set BOOTSTRAP_ADMIN_PASSWORD}
+      AI_ENABLED: 'true'
+      AI_AUTOCONFIG_EXCLUDE: ''
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:?Fill DEEPSEEK_API_KEY in the server .env}
+      DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
+      OCR_ENABLED: 'true'
+      BAIDU_API_KEY: ${BAIDU_API_KEY:?Fill BAIDU_API_KEY in the server .env}
+      BAIDU_SECRET_KEY: ${BAIDU_SECRET_KEY:?Fill BAIDU_SECRET_KEY in the server .env}
+      ALIPAY_ENABLED: 'true'
+      ALIPAY_APP_ID: ${ALIPAY_APP_ID:?Fill ALIPAY_APP_ID in the server .env}
+      ALIPAY_PRIVATE_KEY: ${ALIPAY_PRIVATE_KEY:?Fill ALIPAY_PRIVATE_KEY in the server .env}
+      ALIPAY_PUBLIC_KEY: ${ALIPAY_PUBLIC_KEY:?Fill ALIPAY_PUBLIC_KEY in the server .env}
+      ALIPAY_NOTIFY_URL: ${ALIPAY_NOTIFY_URL:-http://60.205.230.175/parking/api/user/rechargeNotify}
+      ALIPAY_RETURN_URL: ${ALIPAY_RETURN_URL:-http://60.205.230.175/parking/user/paymentResult}
+      OSS_ENABLED: 'true'
+      OSS_ACCESS_KEY_ID: ${OSS_ACCESS_KEY_ID:?Fill OSS_ACCESS_KEY_ID in the server .env}
+      OSS_ACCESS_KEY_SECRET: ${OSS_ACCESS_KEY_SECRET:?Fill OSS_ACCESS_KEY_SECRET in the server .env}
+      OSS_BUCKET: ${OSS_BUCKET:?Fill OSS_BUCKET in the server .env}
+      OSS_ENDPOINT: ${OSS_ENDPOINT:?Fill OSS_ENDPOINT in the server .env}
+      BACKGROUND_TASKS_ENABLED: 'true'
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_USER: ${RABBITMQ_USER:-parking}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD}
+      EXPORT_DIR: /app/exports
+      SPRING_DATASOURCE_HIKARI_MINIMUM_IDLE: '1'
+      SERVER_TOMCAT_THREADS_MAX: '24'
+      SERVER_TOMCAT_THREADS_MIN_SPARE: '2'
+      SERVER_TOMCAT_MAX_CONNECTIONS: '64'
+      SERVER_TOMCAT_ACCEPT_COUNT: '16'
+      SPRING_TASK_EXECUTION_POOL_CORE_SIZE: '2'
+      SPRING_TASK_EXECUTION_POOL_MAX_SIZE: '4'
+      SPRING_TASK_EXECUTION_POOL_QUEUE_CAPACITY: '32'
+      PARKING_QUEUE_WORKER_THREADS: '2'
+      PARKING_QUEUE_NETTY_THREADS: '2'
+      SPRING_RABBITMQ_LISTENER_SIMPLE_AUTO_STARTUP: 'true'
+      BAIDU_APP_ID: ${BAIDU_APP_ID:-}
+      DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-chat}
+    volumes:
+    - backend-logs:/app/logs
+    - export-data:/app/exports
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      redis-cache:
+        condition: service_healthy
+    healthcheck:
+      test:
+      - CMD
+      - curl
+      - --fail
+      - --silent
+      - http://localhost:8080/actuator/health
+      interval: 10s
+      timeout: 5s
+      start_period: 90s
+      retries: 24
+    logging: *id001
+    restart: unless-stopped
+    image: parking-backend:cloud-payment-v3
+  frontend:
+    mem_limit: 64m
+    ports:
+    - ${HTTP_BIND:-127.0.0.1}:${HTTP_PORT:-8088}:80
+    depends_on:
+      backend:
+        condition: service_healthy
+    logging: *id001
+    restart: unless-stopped
+    image: parking-frontend:cloud-parking-payment-v4
+    networks:
+      default: {}
+      web-entry:
+        aliases:
+        - parking-web
+  rabbitmq:
+    image: parking-rabbitmq:4.1.4-management-cloud
+    hostname: parking-rabbitmq
+    mem_limit: 320m
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-parking}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD}
+      RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS: +S 2:2 +SDcpu 1 +SDio 1 +A 4
+      RABBITMQ_CTL_ERL_ARGS: +S 1:1 +SDcpu 1 +SDio 1 +A 2
+    ports:
+    - 127.0.0.1:${RABBITMQ_MANAGEMENT_PORT:-15672}:15672
+    volumes:
+    - rabbitmq-data:/var/lib/rabbitmq
+    - ./deploy/rabbitmq/cloud.conf:/etc/rabbitmq/rabbitmq.conf:ro,Z
+    healthcheck:
+      test:
+      - CMD
+      - rabbitmq-diagnostics
+      - -q
+      - ping
+      interval: 10s
+      timeout: 5s
+      retries: 24
+      start_period: 40s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+    restart: unless-stopped
+volumes:
+  backend-logs: null
+  mysql-data: null
+  redis-data: null
+  rabbitmq-data: null
+  export-data: null
+networks:
+  web-entry:
+    external: true
+    name: ${PARKING_ENTRY_NETWORK:-web-entry}

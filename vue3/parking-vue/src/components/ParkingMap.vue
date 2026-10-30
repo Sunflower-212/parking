@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { CELL, cellAt, coordinateKey, zoomAt, fitView, rectangleCells } from '@/utils/map-geometry'
+import { buildConnections, drawRoad, drawWall, entranceSymbol } from '@/utils/map-tiles'
 const props = defineProps({
   spaces: { type: Array, default: () => [] },
   modelValue: { type: Array, default: () => [] },
@@ -23,6 +24,7 @@ const canvas = ref(),
 const index = computed(
   () => new Map(props.spaces.map((s) => [coordinateKey(s.spaces_row, s.spaces_col), s])),
 )
+const connections = computed(() => buildConnections(index.value))
 const selected = computed(() => new Set(props.modelValue.map((s) => s.id)))
 const legend = [
   ['#10b981', '空闲'],
@@ -108,42 +110,21 @@ function draw() {
           ctx.fill()
         }
       } else if (flag === 2) {
-        ctx.fillStyle = '#dfe7f0'
-        ctx.fillRect(x, y, CELL, CELL)
-        const horizontal = [col - 1, col + 1].some(
-          (c) => index.value.get(coordinateKey(row, c))?.spaces_flag === 2,
-        )
-        ctx.strokeStyle = '#fff'
-        ctx.lineWidth = 1.5
-        ctx.setLineDash([7, 7])
-        ctx.beginPath()
-        if (horizontal) {
-          ctx.moveTo(x, y + CELL / 2)
-          ctx.lineTo(x + CELL, y + CELL / 2)
-        } else {
-          ctx.moveTo(x + CELL / 2, y)
-          ctx.lineTo(x + CELL / 2, y + CELL)
-        }
-        ctx.stroke()
-        ctx.setLineDash([])
+        drawRoad(ctx, connections.value.get(coordinateKey(row, col)), x, y, CELL, scale.value)
       } else if (flag === 3) {
-        ctx.fillStyle = '#475569'
-        const horizontal = [col - 1, col + 1].some(
-          (c) => index.value.get(coordinateKey(row, c))?.spaces_flag === 3,
-        )
-        ctx.fillRect(
-          x + (horizontal ? 0 : 20),
-          y + (horizontal ? 20 : 0),
-          horizontal ? CELL : 18,
-          horizontal ? 18 : CELL,
-        )
+        drawWall(ctx, connections.value.get(coordinateKey(row, col)), x, y, CELL)
       } else {
         ctx.fillStyle = '#e0ecff'
-        ctx.fillRect(x + 2, y + 2, CELL - 4, CELL - 4)
+        ctx.fillRect(x, y, CELL, CELL)
         ctx.fillStyle = '#2563eb'
         ctx.font = 'bold 22px sans-serif'
         ctx.textAlign = 'center'
-        if (labels) ctx.fillText('↔', x + CELL / 2, y + 28)
+        if (labels)
+          ctx.fillText(
+            entranceSymbol(connections.value.get(coordinateKey(row, col))),
+            x + CELL / 2,
+            y + 28,
+          )
       }
       if (chosen && flag >= 2) {
         ctx.strokeStyle = '#2563eb'

@@ -192,7 +192,7 @@ class ParkingIntegrationTest {
     }
     @Test void lateAndRepeatedPaymentCreditsOnlyOnce() {
         int id=insert("insert into recharges(user_id,amounts,flag,pay_method,create_time) values(?,12.34,2,0,now())",user);
-        var params=new HashMap<String,String>();params.put("app_id","integration-app");params.put("trade_status","TRADE_SUCCESS");params.put("out_trade_no",Integer.toString(id));params.put("total_amount","12.34");params.put("trade_no",prefix);params.put("gmt_payment","2026-10-17 12:00:00");
+        var params=new HashMap<String,String>();params.put("app_id","integration-app");params.put("trade_status","TRADE_SUCCESS");params.put("out_trade_no",Integer.toString(id));params.put("total_amount","12.34");params.put("trade_no",prefix);params.put("gmt_payment",LocalDateTime.now(clock).withNano(0).format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
         payments.confirm(params);payments.confirm(params);
         assertEquals(0,new BigDecimal("32.34").compareTo(db.queryForObject("select balance from user where id=?",BigDecimal.class,user)));
         params.put("total_amount","99.00");assertThrows(IllegalArgumentException.class,()->payments.confirm(params));
@@ -318,7 +318,7 @@ class ParkingIntegrationTest {
     }
     @Test void concurrentPaymentCallbacksCreditOnce() throws Exception {
         int id=insert("insert into recharges(user_id,amounts,flag,pay_method,create_time) values(?,12.34,0,0,now())",user);
-        var params=Map.of("app_id","integration-app","trade_status","TRADE_SUCCESS","out_trade_no",Integer.toString(id),"total_amount","12.34","trade_no",prefix,"gmt_payment","2026-10-17 12:00:00");
+        var params=Map.of("app_id","integration-app","trade_status","TRADE_SUCCESS","out_trade_no",Integer.toString(id),"total_amount","12.34","trade_no",prefix,"gmt_payment",LocalDateTime.now(clock).withNano(0).format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
         var pool=Executors.newFixedThreadPool(2);try{var a=pool.submit(()->payments.confirm(params));var b=pool.submit(()->payments.confirm(params));a.get(5,TimeUnit.SECONDS);b.get(5,TimeUnit.SECONDS);}finally{pool.shutdownNow();}
         assertEquals(0,new BigDecimal("32.34").compareTo(db.queryForObject("select balance from user where id=?",BigDecimal.class,user)));
     }

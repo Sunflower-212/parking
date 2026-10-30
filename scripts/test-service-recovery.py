@@ -7,9 +7,9 @@ from urllib.parse import urlencode
 
 ROOT=Path(__file__).resolve().parents[1]
 credentials=dict(line.split('=',1) for line in (ROOT/'.env').read_text(encoding='utf-8').splitlines() if '=' in line and not line.startswith('#'))
-COMPOSE=['docker','compose','-p','parking-verification','-f','compose.yml','-f','compose.test.yml']
+COMPOSE=['docker','compose','-p','parking-verification','-f','compose.test.yml']
 background=os.environ.get('PARKING_BACKGROUND_RECOVERY')=='true'
-if background:COMPOSE+=['-f','compose.background.yml','-f','compose.background.test.yml','--profile','background']
+if background:COMPOSE+=['--profile','background']
 def service(*args):subprocess.run([*COMPOSE,*args],cwd=ROOT,check=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
 def request(path,token=None,method='GET',body=None,extra_headers=None):
     headers={'Content-Type':'application/json',**(extra_headers or {})}

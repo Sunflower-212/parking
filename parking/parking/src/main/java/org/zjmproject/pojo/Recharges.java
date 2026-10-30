@@ -15,6 +15,10 @@ public class Recharges {
     private Integer flag;
     private LocalDateTime pay_time;
     private LocalDateTime create_time;
+    private String merchant_order_no;
+    private LocalDateTime expires_at;
+    private String payment_state;
+    private Boolean cancel_requested;
 
     private String user_name;
 }

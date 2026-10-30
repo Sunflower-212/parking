@@ -7,7 +7,6 @@ import lombok.NoArgsConstructor;
 
 
 @NoArgsConstructor
-@AllArgsConstructor
 @Data
 public class FormContent<T> {
     private T form;  // 表单内容
@@ -15,4 +14,9 @@ public class FormContent<T> {
     private BigDecimal reAmounts;//确认金额
     private Integer rechargeId;//确认充值id
     private String rechargeName;//充值名称
+    private String merchantOrderNo;
+    private java.time.LocalDateTime expiresAt;
+    public FormContent(T form, String contentType, BigDecimal reAmounts, Integer rechargeId, String rechargeName) {
+        this.form=form;this.contentType=contentType;this.reAmounts=reAmounts;this.rechargeId=rechargeId;this.rechargeName=rechargeName;
+    }
 }

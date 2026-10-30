@@ -3,7 +3,9 @@ import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import Components from 'unplugin-vue-components/vite'
 import { ElementPlusResolver } from 'unplugin-vue-components/resolvers'
+const appBase = process.env.VITE_APP_BASE || '/'
 export default defineConfig({
+  base: appBase,
   plugins: [
     vue(),
     !process.env.VITEST &&
@@ -14,10 +16,10 @@ export default defineConfig({
     host: '127.0.0.1',
     port: 5173,
     proxy: {
-      '/api': {
+      [`${appBase}api`]: {
         target: 'http://localhost:8080',
         changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/api/, ''),
+        rewrite: (path) => path.slice(`${appBase}api`.length) || '/',
       },
     },
   },

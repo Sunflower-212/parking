@@ -26,6 +26,7 @@ const ChartsVue = () => import('@/views/admin/Charts.vue')
 
 import { useTokenStore } from '@/stores/token'
 import { jwtDecode } from 'jwt-decode'
+import { rememberPaymentReturn } from '@/utils/payment-context'
 
 //定义路由关系
 const routes = [
@@ -46,6 +47,7 @@ const routes = [
       { path: '/user/rechargeHistory', component: RechargeHistoryVue },
       { path: '/user/info', component: UserInfoVue },
       { path: '/user/account', component: UserAccountVue },
+      { path: '/user/paymentResult', component: () => import('@/views/user/PaymentResult.vue') },
       { path: '/user/avatar', component: UserAvatarVue },
       { path: '/user/resetPassword', component: UserResetPasswordVue },
     ],
@@ -73,7 +75,7 @@ const routes = [
 
 //创建路由器
 const router = createRouter({
-  history: createWebHistory(),
+  history: createWebHistory(import.meta.env.BASE_URL),
   routes: routes,
 })
 
@@ -89,14 +91,19 @@ router.beforeEach((to) => {
     if (
       // 路由守卫同步限制平台管理页面，但只是界面控制；接口权限仍由后端独立验证。
       role === 0 &&
-      ['/admin/userManagement', '/admin/rechargesManagement', '/admin/adminManagement', '/admin/auditLogs'].includes(
-        to.path,
-      )
+      [
+        '/admin/userManagement',
+        '/admin/rechargesManagement',
+        '/admin/adminManagement',
+        '/admin/auditLogs',
+      ].includes(to.path)
     )
       return '/admin/charts'
     if (to.path.startsWith('/user') && role !== -1) return '/admin'
     return true
   } catch {
+    if (to.path === '/user/paymentResult' || to.path === '/user/account')
+      rememberPaymentReturn(to.query)
     tokenStore.removeToken()
     return '/login'
   }
