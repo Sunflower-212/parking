@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test'
 import { mkdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 
-const base = process.env.E2E_APP_BASE || '/'
+const base = `${(process.env.E2E_APP_BASE || '').replace(/\/$/, '')}/`
 const evidence = resolve('../../.work/payment-lifecycle/ui')
 mkdirSync(evidence, { recursive: true })
 const token = `e30.${Buffer.from(JSON.stringify({ claims: { id: 1, permissions: -1, username: 'payment-fixture' }, exp: Math.floor(Date.now() / 1000) + 3600 })).toString('base64url')}.fixture`
@@ -23,6 +23,13 @@ async function setup(page, { loggedIn = true, providerUnavailable = false } = {}
     else if (path === 'user/userInfo')
       data = { id: 1, user_name: 'payment-fixture', status: 0, balance: credited ? 30 : 20 }
     else if (path === 'system/capabilities') data = { alipay: true }
+    else if (path === 'user/membership/plans')
+      data = [
+        { code: 'MONTHLY', name: '月度', price: 188, months: 1 },
+        { code: 'QUARTERLY', name: '季度', price: 488, months: 3 },
+        { code: 'YEARLY', name: '年度', price: 1888, months: 12 },
+      ]
+    else if (path === 'user/membership/orders/current') data = null
     else if (path === 'user/recharge') {
       creates++
       data = {
@@ -138,10 +145,14 @@ test('a successful return parameter cannot show successful credit while verifica
   const ico = await icoResponse.body()
   expect(ico.readUInt16LE(2)).toBe(1)
   expect(ico.readUInt16LE(4)).toBe(3)
-  expect([0, 1, 2].map(i => ico[6 + i * 16])).toEqual([16, 32, 48])
+  expect([0, 1, 2].map((i) => ico[6 + i * 16])).toEqual([16, 32, 48])
   await expect(page.getByText('到账确认中', { exact: true })).toBeVisible()
   await expect(page.getByText('充值成功，余额已更新', { exact: true })).toHaveCount(0)
-  await page.screenshot({ path: resolve(evidence, 'payment-pending.png'), fullPage: true, animations: 'disabled' })
+  await page.screenshot({
+    path: resolve(evidence, 'payment-pending.png'),
+    fullPage: true,
+    animations: 'disabled',
+  })
   expect(fixture.checks).toBe(1)
   expect(fixture.errors).toEqual([])
 })

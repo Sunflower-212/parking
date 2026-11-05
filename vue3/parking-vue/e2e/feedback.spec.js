@@ -177,24 +177,54 @@ test('password reset cancellation is quiet, success is explicit, and failed dele
   )
   await expect(row).toBeVisible()
 })
-test('membership failure does not claim success and later successful renewal refreshes the account', async ({
+test('membership failure does not claim success and later successful purchase refreshes the account', async ({
   page,
 }) => {
   await login(page, false)
-  await page.goto('/user/account')
+  const account = {
+    id: 1,
+    user_name: user,
+    status: 0,
+    balance: 200,
+    available_balance: 200,
+    reserved_balance: 0,
+  }
+  await page.route('**/api/user/userInfo', (route) =>
+    route.fulfill({ json: { code: 0, data: account } }),
+  )
+  await page.route('**/api/user/membership/plans', (route) =>
+    route.fulfill({
+      json: { code: 0, data: [{ code: 'MONTHLY', name: '月度', price: 188, months: 1 }] },
+    }),
+  )
+  await page.route('**/api/user/membership/orders/current', (route) =>
+    route.fulfill({ json: { code: 0, data: null } }),
+  )
+  await page.route('**/api/user/membership/orders', (route) => {
+    account.status = 1
+    account.balance = account.available_balance = 12
+    account.vip_end_time = '2099-12-31T12:00:00'
+    return route.fulfill({
+      json: { code: 0, data: { id: 'feedback-member', state: 'SUCCEEDED', renewed: false } },
+    })
+  })
   await page.route(
-    /\/api\/user\/(getVip|vipRenewal)$/,
+    '**/api/user/membership/orders',
     (route) => route.fulfill({ json: { code: 1, message: '会员操作暂不可用' } }),
     { times: 1 },
   )
-  await page.getByRole('button', { name: '确认开通', exact: true }).click()
+  await page.goto('/user/account')
+  await page.getByRole('button', { name: /^余额支付.*188/ }).click()
   await expect(page.locator('[data-testid=operation-error-alert]')).toContainText(
     '会员操作暂不可用',
   )
   await expect(page.locator('.el-message--success')).toHaveCount(0)
-  await page.getByRole('button', { name: '确认开通', exact: true }).click()
-  await expect(page.locator('.el-message--success')).toContainText('会员信息已更新')
-  await expect(page.getByRole('button', { name: '确认续期', exact: true })).toBeVisible()
+  await page.getByRole('button', { name: /^余额支付.*188/ }).click()
+  await expect(page.locator('.el-message--success')).toContainText('会员已开通')
+  await expect(page.locator('.profile .el-tag')).toHaveText('会员')
+  await expect(
+    page.locator('.account-grid section').first().locator('strong').first(),
+  ).toContainText('12.00')
 })
 test('export JSON errors never become a download and valid CSV announces download start', async ({
   page,

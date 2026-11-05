@@ -5,6 +5,8 @@ for (const count of [1000, 10000]) {
   test(`map ${count} positions: bounded rendering, pointer zoom and responsive layout`, async ({
     page,
   }) => {
+    // Set the viewport before mounting so ResizeObserver cannot refit during the pinch.
+    await page.setViewportSize({ width: 1440, height: 1000 })
     const cells = Array.from({ length: count }, (_, i) => ({
       id: i + 1,
       park_id: 1,
@@ -35,8 +37,12 @@ for (const count of [1000, 10000]) {
     await expect(page).toHaveURL(/\/admin\//)
     await page.goto('/admin/spaceManagement')
     await expect(page.getByRole('cell', { name: 'P1', exact: true })).toBeVisible()
-    await page.setViewportSize({ width: 1440, height: 1000 })
     await page.getByRole('button', { name: '适配全图', exact: true }).click()
+    await page
+      .locator('canvas')
+      .evaluate(
+        () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+      )
     const session = await page.context().newCDPSession(page)
     await session.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 2 })
     const touchBounds = await page.locator('canvas').boundingBox(),
