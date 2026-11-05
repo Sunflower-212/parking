@@ -45,10 +45,20 @@ for (const count of [1000, 10000]) {
       )
     const session = await page.context().newCDPSession(page)
     await session.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 2 })
+    await page.locator('canvas').scrollIntoViewIfNeeded()
     const touchBounds = await page.locator('canvas').boundingBox(),
       x = touchBounds.x + touchBounds.width / 2,
       y = touchBounds.y + touchBounds.height / 2
     const priorZoom = await page.locator('.map-controls > span').innerText()
+    expect(
+      await page
+        .locator('canvas')
+        .evaluate(
+          (canvas, point) =>
+            [-30, 30].every((dx) => document.elementFromPoint(point.x + dx, point.y) === canvas),
+          { x, y },
+        ),
+    ).toBe(true)
     await session.send('Input.dispatchTouchEvent', {
       type: 'touchStart',
       touchPoints: [
@@ -63,8 +73,9 @@ for (const count of [1000, 10000]) {
         { x: x + 60, y: y + 15, id: 2 },
       ],
     })
-    await session.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+    // Let Chromium deliver the coalesced pointer moves before ending both touches.
     await expect(page.locator('.map-controls > span')).not.toHaveText(priorZoom)
+    await session.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
     await session.send('Emulation.setTouchEmulationEnabled', { enabled: false })
     await page.getByRole('button', { name: '适配全图', exact: true }).click()
     const samples = await page.locator('canvas').evaluate(async (canvas) => {
