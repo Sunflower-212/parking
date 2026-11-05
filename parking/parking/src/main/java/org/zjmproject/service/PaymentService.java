@@ -18,7 +18,8 @@ import java.util.*;
 @Service
 public class PaymentService {
     public record Scheduled(int id,long version) {}
-    public record Status(int id, BigDecimal amounts, String paymentState, LocalDateTime expiresAt, boolean canCheck) {}
+    public record Status(int id, BigDecimal amounts, String paymentState, LocalDateTime expiresAt,
+                         boolean canCheck, String businessType, MembershipService.Order membershipOrder) {}
     private record Work(int id,long version,String token,Map<String,Object> charge,int attempts) {}
     private final JdbcTemplate db;
     private final AliPayService alipay;
@@ -28,6 +29,7 @@ public class PaymentService {
     private final boolean enabled;
     private final String appId;
     private final Duration timeout;
+    @org.springframework.beans.factory.annotation.Autowired private MembershipService membership;
     public PaymentService(JdbcTemplate db,AliPayService alipay,PlatformTransactionManager manager,
             ApplicationEventPublisher events,Clock clock,
             @Value("${parking.integrations.alipay:false}") boolean enabled,
@@ -59,7 +61,12 @@ public class PaymentService {
     public Status status(int userId,int id) {return status(owned(userId,id));}
     private Status status(Map<String,Object> row) {
         String state=number(row.get("flag"))==1?"PAID":Objects.toString(row.get("payment_state"),"VERIFYING");
-        return new Status(number(row.get("id")),new BigDecimal(row.get("amounts").toString()),state,time(row.get("expires_at")),!Set.of("PAID","CLOSED").contains(state));
+        String type=Objects.toString(row.get("business_type"),"NORMAL_RECHARGE");
+        var order=row.get("membership_order_id")==null?null:membership.paymentOrder((String)row.get("membership_order_id"),number(row.get("user_id")));
+        return new Status(number(row.get("id")),new BigDecimal(row.get("amounts").toString()),state,time(row.get("expires_at")),external(row) && !Set.of("PAID","CLOSED").contains(state),type,order);
+    }
+    private boolean external(Map<String,Object> row) {
+        return !MembershipService.DEBIT.equals(row.get("business_type")) && row.get("pay_method") instanceof Number method && method.intValue()==0;
     }
     private void enqueue(int id) {
         var row=db.queryForMap("select version from payment_event where recharge_id=?",id);
@@ -87,7 +94,8 @@ public class PaymentService {
         return alipay.pay(id);
     }
     public Status cancel(int userId,int id) {
-        requireEnabled(); owned(userId,id);
+        requireEnabled();
+        if(!external(owned(userId,id))) throw new IllegalArgumentException("此记录不支持支付操作");
         tx.executeWithoutResult(s->{
             var row=lockCharge(id);
             if(number(row.get("flag"))==1 || "CLOSED".equals(row.get("payment_state"))) return;
@@ -113,7 +121,10 @@ public class PaymentService {
         var original=charge(id);
         var users=db.queryForList("select id from user where id=? for update",original.get("user_id"));
         if(users.isEmpty()) throw new IllegalStateException("充值用户不存在");
-        return db.queryForMap("select * from recharges where id=? for update",id);
+        var order=original.get("membership_order_id")==null?null:membership.lock((String)original.get("membership_order_id"),number(original.get("user_id")));
+        var locked=db.queryForMap("select * from recharges where id=? for update",id);
+        if(order!=null) locked.put("membership_state",order.get("state"));
+        return locked;
     }
     /** Called only after notification signature verification; return parameters are never passed here. */
     public void confirm(Map<String,String> params) {
@@ -129,14 +140,15 @@ public class PaymentService {
             credit(id,new PaymentTrade(no,params.get("trade_no"),state,new BigDecimal(params.get("total_amount")),paidAt));
         } else if("TRADE_CLOSED".equals(state)) {
             tx.executeWithoutResult(s->{var row=lockCharge(id);if(number(row.get("flag"))!=1) {
-                if(params.get("total_amount")==null || new BigDecimal(row.get("amounts").toString()).compareTo(new BigDecimal(params.get("total_amount")))!=0)
+                if(!external(row) || params.get("total_amount")==null || new BigDecimal(row.get("amounts").toString()).compareTo(new BigDecimal(params.get("total_amount")))!=0)
                     throw new IllegalArgumentException("支付金额不匹配");
-                db.update("update recharges set flag=2,payment_state='CLOSED' where id=?",id);complete(id);
+                db.update("update recharges set flag=2,payment_state='CLOSED' where id=?",id);
+                closeMembership(row);complete(id);
             }});
         }
     }
     private void validatePaid(Map<String,Object> row,PaymentTrade trade) {
-        if(!trade.paid() || !orderNo(row).equals(trade.orderNo()) || trade.amount()==null ||
+        if(!external(row) || !trade.paid() || !orderNo(row).equals(trade.orderNo()) || trade.amount()==null ||
                 trade.amount().signum()<=0 || new BigDecimal(row.get("amounts").toString()).compareTo(trade.amount())!=0 ||
                 number(row.get("pay_method"))!=0 || trade.tradeNo()==null || trade.tradeNo().isBlank() || trade.tradeNo().length()>64 || trade.paidAt()==null)
             throw new IllegalArgumentException("支付信息不匹配");
@@ -152,11 +164,20 @@ public class PaymentService {
             }
             if(db.update("update user set balance=balance+?,update_time=now() where id=?",trade.amount(),row.get("user_id"))!=1) throw new IllegalStateException("充值用户不存在");
             db.update("update recharges set flag=1,payment_state='PAID',pay_no=?,pay_time=? where id=?",trade.tradeNo(),trade.paidAt(),id);
+            if(row.get("membership_order_id")!=null) {
+                membership.settle((String)row.get("membership_order_id"),number(row.get("user_id")));
+                if("CLOSED".equals(row.get("membership_state")))
+                    db.update("update recharges set description='会员充值补充（订单已关闭，转入余额）' where id=?",id);
+            }
             complete(id);RuntimeEvents.committed("payment.confirm","SUCCESS",id);
         });
     }
     private void complete(int id) {
         db.update("update payment_event set version=version+1,completed_at=?,lease_token=null,lease_until=null,last_error=null where recharge_id=? and completed_at is null",now(),id);
+    }
+    private void closeMembership(Map<String,Object> row) {
+        if(row.get("membership_order_id")!=null)
+            membership.close((String)row.get("membership_order_id"),number(row.get("user_id")));
     }
     private Work claim(int id,Long expected,boolean manual) {
         return tx.execute(s->{
@@ -218,6 +239,7 @@ public class PaymentService {
             var row=lockCharge(work.id());var event=db.queryForMap("select * from payment_event where recharge_id=? for update",work.id());
             if(number(row.get("flag"))==1 || !Objects.equals(event.get("lease_token"),work.token()) || ((Number)event.get("version")).longValue()!=work.version()) return;
             db.update("update recharges set payment_state=?,flag=case when ?='CLOSED' then 2 else flag end where id=?",state,state,work.id());
+            if("CLOSED".equals(state)) closeMembership(row);
             db.update("update payment_event set version=version+1,next_run_at=?,completed_at=?,attempts=?,last_error=?,lease_token=null,lease_until=null where recharge_id=?",due==null?now():due,due==null?now():null,errors,reason,work.id());
             if(due!=null) enqueue(work.id());
             RuntimeEvents.committed("payment.reconcile",state,work.id());

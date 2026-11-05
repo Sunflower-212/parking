@@ -45,6 +45,14 @@ class AlipayProtocolTest {
         var body=new org.json.JSONObject(captured.getValue().getBizContent());
         assertEquals("PKunique",body.getString("out_trade_no"));assertEquals("2026-10-30 23:00:00",body.getString("time_expire"));
         assertFalse(body.has("timeout_express"));assertEquals(config.getReturnUrl()+"?rechargeId=7",captured.getValue().getReturnUrl());
+        assertEquals("余额充值",body.getString("subject"));
+        clearInvocations(client);
+        row.setBusiness_type("MEMBERSHIP_TOPUP");row.setAmounts(new BigDecimal("88.00"));
+        var supplement=service.pay(7);verify(client).pageExecute(captured.capture());
+        body=new org.json.JSONObject(captured.getValue().getBizContent());
+        assertEquals("会员充值补充",body.getString("subject"));
+        assertEquals(0,new BigDecimal("88.00").compareTo(body.getBigDecimal("total_amount")));
+        assertEquals("会员充值补充",supplement.getRechargeName());
     }
     @Test void notFoundAndCloseRaceAreExplicitProviderResults() throws Exception {
         var client=mock(AlipayClient.class);var service=new AliPayServiceImpl(){@Override protected AlipayClient client(){return client;}};

@@ -39,7 +39,7 @@ public class DashboardService {
         if(role==1) {
             counts.putAll(db.queryForMap("select count(*) userNumber,coalesce(sum(create_time>=? and create_time<?),0) todayNewUserNumber from user",today.atStartOfDay(),today.plusDays(1).atStartOfDay()));
             counts.put("adminNumber",db.queryForObject("select count(*) from admin",Long.class));
-            for(var row:db.queryForList("select date(create_time) day,count(*) rechargeCount,sum(amounts) rechargeAmount from recharges where flag=1 and create_time>=? and create_time<? group by date(create_time)",first.atStartOfDay(),today.plusDays(1).atStartOfDay())) {
+            for(var row:db.queryForList("select date(create_time) day,count(*) rechargeCount,sum(amounts) rechargeAmount from recharges where flag=1 and business_type in ('NORMAL_RECHARGE','MEMBERSHIP_TOPUP') and create_time>=? and create_time<? group by date(create_time)",first.atStartOfDay(),today.plusDays(1).atStartOfDay())) {
                 var target=series.get(row.get("day").toString());target.put("rechargeAmount",row.get("rechargeAmount"));target.put("rechargeCount",row.get("rechargeCount"));
             }
         }

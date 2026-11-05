@@ -169,7 +169,7 @@ services:
       retries: 24
     logging: *id001
     restart: unless-stopped
-    image: parking-backend:cloud-payment-v3
+    image: parking-backend:cloud-membership-v1
   frontend:
     mem_limit: 64m
     ports:
@@ -179,7 +179,7 @@ services:
         condition: service_healthy
     logging: *id001
     restart: unless-stopped
-    image: parking-frontend:cloud-parking-payment-v4
+    image: parking-frontend:cloud-membership-v1
     networks:
       default: {}
       web-entry:

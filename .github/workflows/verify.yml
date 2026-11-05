@@ -36,6 +36,7 @@ jobs:
           cd ../..
           python3 scripts/test-migration.py
           python3 scripts/test-payment-migration.py
+          python3 scripts/test-membership-migration.py
       - name: Frontend tests and production build
         working-directory: vue3/parking-vue
         run: |

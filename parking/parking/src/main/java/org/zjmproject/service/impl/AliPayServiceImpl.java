@@ -35,14 +35,15 @@ public class AliPayServiceImpl implements AliPayService {
         var content=new JSONObject();
         content.put("out_trade_no",charge.getMerchant_order_no());
         content.put("total_amount",charge.getAmounts());
-        content.put("subject","余额充值"); content.put("product_code","FAST_INSTANT_TRADE_PAY");
+        String subject=org.zjmproject.service.MembershipService.TOPUP.equals(charge.getBusiness_type())?"会员充值补充":"余额充值";
+        content.put("subject",subject); content.put("product_code","FAST_INSTANT_TRADE_PAY");
         content.put("time_expire",charge.getExpires_at().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
         var request=new AlipayTradePagePayRequest(); request.setBizContent(content.toString());
         request.setNotifyUrl(config.getNotifyUrl());
         // The internal ID is navigation context only; ownership and payment facts are checked server-side.
         request.setReturnUrl(config.getReturnUrl()+(config.getReturnUrl().contains("?")?"&":"?")+"rechargeId="+id);
         try {
-            var result=new FormContent<>(client().pageExecute(request).getBody(),"text/html;charset=UTF-8",charge.getAmounts(),id,"余额充值");
+            var result=new FormContent<>(client().pageExecute(request).getBody(),"text/html;charset=UTF-8",charge.getAmounts(),id,subject);
             result.setMerchantOrderNo(charge.getMerchant_order_no()); result.setExpiresAt(charge.getExpires_at());
             return result;
         } catch(AlipayApiException e) { throw new IllegalStateException("生成支付页面失败，请稍后重试"); }

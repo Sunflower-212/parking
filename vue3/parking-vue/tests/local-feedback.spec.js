@@ -14,13 +14,20 @@ vi.mock('../src/utils/request', () => ({
   default: { get: vi.fn(), post: vi.fn(), patch: vi.fn() },
 }))
 vi.mock('../src/stores/userInfo', () => ({
-  default: () => ({ info: { balance: 0, status: 0 }, setInfo: vi.fn() }),
+  default: () => ({ info: { id: 1, balance: 0, status: 0 }, setInfo: vi.fn() }),
 }))
 let wrapper
 beforeEach(() => {
   failureAlerts.value.forEach((alert) => closeFailure(alert.id))
   vi.clearAllMocks()
-  request.get.mockResolvedValue({ data: {} })
+  sessionStorage.clear()
+  request.get.mockImplementation(async (path) => ({
+    data: path.endsWith('/plans')
+      ? [{ code: 'MONTHLY', name: '月度', price: 188, months: 1 }]
+      : path.endsWith('/current')
+        ? null
+        : {},
+  }))
 })
 afterEach(() => {
   wrapper?.unmount()
@@ -81,11 +88,11 @@ it('explains an unavailable payment form without reporting recharge success', as
 it('keeps a successful membership write distinct from a failed account refresh', async () => {
   wrapper = shallowMount(UserAccount, options)
   await flushPromises()
-  request.patch.mockResolvedValue({ code: 0 })
+  request.post.mockResolvedValue({ code: 0, data: { state: 'SUCCEEDED', renewed: true } })
   request.get.mockRejectedValueOnce(new Error('refresh failed'))
   await wrapper.vm.membership()
   expect(ElMessage).toHaveBeenLastCalledWith(
-    expect.objectContaining({ type: 'warning', message: '会员信息已更新，账户刷新失败，请重试' }),
+    expect.objectContaining({ type: 'warning', message: '会员已续期，账户刷新失败，请重试' }),
   )
   expect(request.get.mock.lastCall[1]).toMatchObject({ feedback: false })
 })

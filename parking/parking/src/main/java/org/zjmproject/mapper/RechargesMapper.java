@@ -23,6 +23,6 @@ public interface RechargesMapper {
     @Select("select * from recharges where flag=#{flag}")
     List<Recharges> findRechargesByFlag(Integer flag);
 
-    @Select("select * from recharges where create_time>=#{startDateTime} and create_time<#{endDateTime} and flag=1")
+    @Select("select * from recharges where create_time>=#{startDateTime} and create_time<#{endDateTime} and flag=1 and business_type in ('NORMAL_RECHARGE','MEMBERSHIP_TOPUP')")
     List<Recharges> findRechargesListByDate(LocalDateTime startDateTime, LocalDateTime endDateTime);
 }

@@ -1,10 +1,17 @@
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { feedback as ElMessage, localFailure } from '@/utils/request-error-notice'
 import DOMPurify from 'dompurify'
 import { useRouter, useRoute } from 'vue-router'
 import { rechargeId, paymentPath, rememberPayment } from '@/utils/payment-context'
 import request from '@/utils/request'
+import {
+  membershipAttempt,
+  readMembershipAttempt,
+  clearMembershipAttempt,
+  membershipEnd,
+  paymentSuccessMessage,
+} from '@/utils/membership'
 import useUser from '@/stores/userInfo'
 import PageShell from '@/components/PageShell.vue'
 import StatusTag from '@/components/StatusTag.vue'
@@ -18,16 +25,76 @@ const store = useUser(),
   loading = ref(false),
   accountError = ref(''),
   amount = ref(100),
-  days = ref(30),
+  plans = ref([]),
+  selectedPlan = ref('MONTHLY'),
+  pendingMembership = ref(null),
+  membershipError = ref(''),
+  membershipLoading = ref(false),
+  uncertainAttempt = ref(false),
   capabilities = ref({}),
   payment = ref(null),
   paymentHtml = ref(''),
   dialog = ref(false),
   formContainer = ref()
+const availableBalance = computed(() =>
+  Number(info.value.available_balance ?? info.value.balance ?? 0),
+)
+const selected = computed(() => plans.value.find((plan) => plan.code === selectedPlan.value))
+const balancePart = computed(() =>
+  Math.min(availableBalance.value, Number(selected.value?.price || 0)),
+)
+const supplement = computed(() =>
+  Math.max(0, Math.round((Number(selected.value?.price || 0) - balancePart.value) * 100) / 100),
+)
+const expectedEnd = computed(() =>
+  selected.value ? membershipEnd(info.value.vip_end_time, selected.value.months) : null,
+)
+const membershipAction = computed(() =>
+  uncertainAttempt.value
+    ? '核对上次购买'
+    : supplement.value > 0
+      ? `支付宝补差 ${money(supplement.value)}`
+      : `余额支付 ${money(selected.value?.price)}`,
+)
+const canContinue = computed(
+  () =>
+    pendingMembership.value?.paymentState === 'PENDING' &&
+    pendingMembership.value.expiresAt >
+      new Intl.DateTimeFormat('sv-SE', {
+        timeZone: 'Asia/Shanghai',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hourCycle: 'h23',
+      })
+        .format(new Date())
+        .replace(' ', 'T'),
+)
+let membershipController,
+  membershipVersion = 0
 let disposed = false,
   refreshing = false,
   refreshVersion = 0,
   refreshController
+watch(
+  () => info.value.id,
+  (id) => {
+    if (!id) return
+    if (pendingMembership.value) {
+      clearMembershipAttempt(id)
+      selectedPlan.value = pendingMembership.value.planCode
+      uncertainAttempt.value = false
+      return
+    }
+    const attempt = readMembershipAttempt(id)
+    if (attempt) selectedPlan.value = attempt.planCode
+    uncertainAttempt.value = !!attempt
+  },
+  { immediate: true },
+)
 async function refresh(silent = false, force = false) {
   if (disposed || (refreshing && !force)) return false
   const version = ++refreshVersion
@@ -57,25 +124,108 @@ async function refresh(silent = false, force = false) {
     }
   }
 }
+async function loadMembership(silent = false) {
+  const version = ++membershipVersion
+  membershipController?.abort()
+  const controller = new AbortController()
+  membershipController = controller
+  membershipLoading.value = true
+  try {
+    const [options, current] = await Promise.all([
+      request.get('/user/membership/plans', { signal: controller.signal, feedback: !silent }),
+      request.get('/user/membership/orders/current', {
+        signal: controller.signal,
+        feedback: !silent,
+      }),
+    ])
+    if (disposed || version !== membershipVersion) return false
+    if (!Array.isArray(options.data)) throw new Error('Invalid membership plans')
+    plans.value = options.data
+    pendingMembership.value = current.data
+    if (current.data) {
+      selectedPlan.value = current.data.planCode
+      clearMembershipAttempt(info.value.id)
+      uncertainAttempt.value = false
+    }
+    membershipError.value = ''
+    return true
+  } catch {
+    if (!disposed && version === membershipVersion && !controller.signal.aborted)
+      membershipError.value = '会员信息加载失败，请重试'
+    return false
+  } finally {
+    if (!disposed && version === membershipVersion) membershipLoading.value = false
+  }
+}
+async function refreshAccount() {
+  await Promise.all([refresh(), loadMembership()])
+}
+async function openMembershipPayment(order) {
+  const result = await request.post(`/user/membership/orders/${order.id}/pay`)
+  if (disposed) return
+  payment.value = result.data
+  paymentHtml.value = DOMPurify.sanitize(result.data.form)
+  paying.value = false
+  dialog.value = true
+}
 async function membership() {
-  if (busy.value) return
+  if (busy.value || !info.value.id || !selected.value || pendingMembership.value) return
+  busy.value = true
+  membershipVersion++
+  membershipController?.abort()
+  try {
+    const attempt = membershipAttempt(info.value.id, selectedPlan.value)
+    uncertainAttempt.value = true
+    const result = await request.post(
+      '/user/membership/orders',
+      { planCode: attempt.planCode },
+      { headers: { 'Idempotency-Key': attempt.key } },
+    )
+    if (disposed) return
+    const order = result.data
+    clearMembershipAttempt(info.value.id)
+    uncertainAttempt.value = false
+    if (order.state === 'SUCCEEDED') {
+      clearMembershipAttempt(info.value.id)
+      const refreshed = await refresh(true, true)
+      if (disposed) return
+      const text = order.renewed ? '会员已续期' : '会员已开通'
+      refreshed ? ElMessage.success(text) : ElMessage.warning(`${text}，账户刷新失败，请重试`)
+    } else if (order.state === 'CLOSED') {
+      clearMembershipAttempt(info.value.id)
+      ElMessage.info('会员订单已关闭，请重新选择套餐')
+      await refresh(true, true)
+    } else {
+      pendingMembership.value = order
+      await refresh(true, true)
+      if (!disposed) await openMembershipPayment(order)
+    }
+  } catch (error) {
+    if (error.code === 1) {
+      clearMembershipAttempt(info.value.id)
+      uncertainAttempt.value = false
+    }
+    localFailure(error, '会员操作失败，请重试')
+    if (!disposed) await Promise.all([refresh(true, true), loadMembership(true)])
+  } finally {
+    busy.value = false
+    membershipLoading.value = false
+  }
+}
+async function continueMembership() {
+  if (busy.value || !pendingMembership.value) return
   busy.value = true
   try {
-    const renew = info.value.vip_start_time
-    await request.patch(
-      renew ? '/user/vipRenewal' : '/user/getVip',
-      new URLSearchParams({ days: days.value }),
-    )
-    // 写入后废弃旧账户请求，防止续期前的慢响应覆盖最新会员状态。
-    const refreshed = await refresh(true, true)
-    refreshed
-      ? ElMessage.success('会员信息已更新')
-      : ElMessage.warning('会员信息已更新，账户刷新失败，请重试')
+    await openMembershipPayment(pendingMembership.value)
   } catch (error) {
-    localFailure(error, '会员操作失败，请重试')
+    localFailure(error, '支付页面暂不可用，请重试')
   } finally {
     busy.value = false
   }
+}
+async function cancelMembership() {
+  if (busy.value || !pendingMembership.value) return
+  await cancel(pendingMembership.value.rechargeId)
 }
 async function recharge() {
   if (busy.value) return
@@ -118,30 +268,38 @@ function pay() {
     localFailure(error, '支付页面不可用，请刷新充值单')
   }
 }
-async function cancel() {
+async function cancel(id = payment.value?.rechargeId) {
   if (busy.value) return
   busy.value = true
   try {
     const result = await request.post(
       '/user/cancelRecharges',
-      new URLSearchParams({ rechargesId: payment.value.rechargeId }),
+      new URLSearchParams({ rechargesId: id }),
     )
+    if (disposed) return
     dialog.value = false
+    if (result.data?.paymentState === 'CLOSED' && result.data?.membershipOrder)
+      clearMembershipAttempt(info.value.id)
     ElMessage.info(
       result.data?.paymentState === 'PAID'
-        ? '充值已到账'
+        ? paymentSuccessMessage(result.data)
         : result.data?.paymentState === 'CLOSED'
-          ? '充值单已关闭'
+          ? result.data?.membershipOrder
+            ? '会员订单已关闭，余额预留已解除'
+            : '充值单已关闭'
           : '已提交取消，正在核验支付状态',
     )
   } catch {
   } finally {
     busy.value = false
-    refresh(true)
+    if (!disposed) await Promise.all([refresh(true, true), loadMembership(true)])
   }
 }
 function focus() {
-  if (!document.hidden) refresh(true)
+  if (!document.hidden && !busy.value) {
+    refresh(true)
+    loadMembership(true)
+  }
 }
 onMounted(async () => {
   const returned = rechargeId(route?.query)
@@ -150,6 +308,7 @@ onMounted(async () => {
     return
   }
   refresh()
+  loadMembership()
   try {
     capabilities.value = (await request.get('/system/capabilities')).data
   } catch {}
@@ -158,6 +317,8 @@ onMounted(async () => {
 })
 onBeforeUnmount(() => {
   disposed = true
+  membershipVersion++
+  membershipController?.abort()
   refreshVersion++
   refreshController?.abort()
   window.removeEventListener('focus', focus)
@@ -167,14 +328,19 @@ onBeforeUnmount(() => {
 <template>
   <PageShell title="个人账户"
     ><template #actions
-      ><el-button :loading="loading" @click="refresh(false)">刷新账户</el-button></template
+      ><el-button :loading="loading" @click="refreshAccount" :disabled="busy"
+        >刷新账户</el-button
+      ></template
     >
     <el-alert v-if="accountError" :title="accountError" type="error" :closable="false"
-      ><el-button link @click="refresh(false)">重试</el-button></el-alert
+      ><el-button link @click="refreshAccount" :disabled="busy">重试</el-button></el-alert
     >
     <div class="account-grid" v-loading="loading">
       <section class="surface">
-        <span class="muted">账户余额</span><strong>{{ money(info.balance) }}</strong>
+        <span class="muted">可用余额</span><strong>{{ money(availableBalance) }}</strong>
+        <p v-if="Number(info.reserved_balance) > 0" class="muted">
+          待支付预留 {{ money(info.reserved_balance) }}
+        </p>
 
         <el-divider />
         <h3>余额充值</h3>
@@ -203,31 +369,95 @@ onBeforeUnmount(() => {
       <section class="surface">
         <span class="muted">会员状态</span
         ><strong><StatusTag :value="info.status" kind="member" /></strong>
-        <p class="muted">
-          {{ info.vip_end_time ? '有效期至 ' + dateTime(info.vip_end_time) : '尚未开通会员' }}
-        </p>
+        <p v-if="info.vip_end_time" class="muted">有效期至 {{ dateTime(info.vip_end_time) }}</p>
         <el-divider />
         <h3>{{ info.vip_start_time ? '续期会员' : '开通会员' }}</h3>
-        <el-form label-position="top" @submit.prevent="membership"
-          ><el-form-item label="会员天数"
-            ><el-input-number v-model="days" :min="1" :max="3650" :precision="0" /></el-form-item
-          ><el-button type="primary" native-type="submit" :loading="busy">{{
-            info.vip_start_time ? '确认续期' : '确认开通'
-          }}</el-button></el-form
+        <el-alert v-if="membershipError" :title="membershipError" type="error" :closable="false">
+          <el-button link @click="loadMembership()">重试</el-button>
+        </el-alert>
+        <div v-if="pendingMembership" class="pending-membership" aria-live="polite">
+          <div class="membership-summary">
+            <strong>{{ pendingMembership.planName }}会员</strong
+            ><StatusTag :value="pendingMembership.paymentState" kind="payment" />
+          </div>
+          <p>
+            已预留 {{ money(pendingMembership.reservedAmount) }} · 待补差
+            {{ money(pendingMembership.supplementAmount) }}
+          </p>
+          <p class="muted">付款截止 {{ dateTime(pendingMembership.expiresAt) }}</p>
+          <p v-if="Number(pendingMembership.reservedAmount) > 0" class="muted">
+            预留金额暂不可用于停车扣费
+          </p>
+          <div class="membership-actions">
+            <el-button v-if="canContinue" type="primary" :loading="busy" @click="continueMembership"
+              >继续支付</el-button
+            >
+            <el-button
+              :disabled="busy"
+              @click="router.push(paymentPath(pendingMembership.rechargeId))"
+              >核验支付</el-button
+            >
+            <el-button :loading="busy" @click="cancelMembership">取消订单</el-button>
+          </div>
+        </div>
+        <el-form
+          v-else
+          label-position="top"
+          @submit.prevent="membership"
+          v-loading="membershipLoading"
         >
+          <div class="membership-plans" role="group" aria-label="会员套餐">
+            <button
+              v-for="plan in plans"
+              :key="plan.code"
+              type="button"
+              class="membership-plan"
+              :class="{ selected: selectedPlan === plan.code }"
+              :aria-pressed="selectedPlan === plan.code"
+              :disabled="busy || uncertainAttempt"
+              @click="selectedPlan = plan.code"
+            >
+              <span>{{ plan.name }}</span
+              ><strong>{{ money(plan.price) }}</strong>
+            </button>
+          </div>
+          <div v-if="selected" class="membership-quote">
+            <p>预计到期 {{ dateTime(expectedEnd) }}</p>
+            <p>
+              余额支付 {{ money(balancePart)
+              }}<span v-if="supplement > 0"> · 需补差 {{ money(supplement) }}</span>
+            </p>
+          </div>
+          <el-button
+            type="primary"
+            native-type="submit"
+            :loading="busy"
+            :disabled="
+              !info.id ||
+              !selected ||
+              !!membershipError ||
+              membershipLoading ||
+              (!uncertainAttempt && supplement > 0 && !capabilities.alipay)
+            "
+            >{{ membershipAction }}</el-button
+          >
+          <p v-if="supplement > 0 && !capabilities.alipay" class="muted">
+            余额不足，支付宝尚未启用
+          </p>
+        </el-form>
       </section>
     </div>
     <el-dialog
       v-model="dialog"
       title="支付宝沙箱支付"
-      width="480px"
+      width="min(480px, calc(100vw - 32px))"
       :close-on-click-modal="false"
-      @closed="refresh"
-      ><p>充值金额：{{ money(payment?.reAmounts) }}</p>
+      @closed="refreshAccount"
+      ><p>{{ payment?.rechargeName || '充值金额' }} {{ money(payment?.reAmounts) }}</p>
       <p class="muted">支付后将自动核验到账。</p>
       <div ref="formContainer" v-html="paymentHtml" style="display: none" />
       <template #footer
-        ><el-button @click="cancel" :loading="busy">取消支付</el-button
+        ><el-button @click="cancel()" :loading="busy">取消支付</el-button
         ><el-button type="primary" :loading="paying" @click="pay"
           >前往支付宝沙箱</el-button
         ></template
@@ -243,5 +473,76 @@ onBeforeUnmount(() => {
   font-size: 17px;
   height: 36px;
   padding: 0 16px;
+}
+</style>
+
+<style scoped>
+.membership-plans {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+.membership-plan {
+  display: grid;
+  gap: 10px;
+  padding: 16px 6px;
+  border: 1px solid #dce5f1;
+  border-radius: 12px;
+  background: white;
+  color: #526078;
+  cursor: pointer;
+  font: inherit;
+}
+.membership-plan.selected {
+  background: #edf5ff;
+  border-color: #409eff;
+  color: #246bc2;
+  box-shadow: 0 0 0 1px #409eff;
+}
+.membership-plan:focus-visible {
+  outline: 3px solid #1f64bd;
+  outline-offset: 3px;
+}
+.membership-plan strong {
+  font-size: 20px;
+  white-space: nowrap;
+}
+.membership-plan:disabled {
+  cursor: wait;
+}
+.membership-quote {
+  margin: 18px 0;
+}
+.membership-quote p {
+  margin: 8px 0;
+}
+.membership-summary {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.membership-summary strong {
+  font-size: 18px;
+}
+.membership-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.membership-actions .el-button {
+  margin-left: 0;
+}
+@media (max-width: 1200px) {
+  .account-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (max-width: 480px) {
+  .membership-plan strong {
+    font-size: 17px;
+  }
+  .membership-plans {
+    gap: 8px;
+  }
 }
 </style>

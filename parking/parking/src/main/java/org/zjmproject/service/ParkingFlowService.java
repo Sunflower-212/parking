@@ -211,7 +211,7 @@ public class ParkingFlowService {
         BigDecimal fee=MoneysUtil.getMoneys(minutes,number(rule,"free_time"),number(rule,"charging_unit"),new BigDecimal(rule.get("unit_cost").toString()));
         LocalDateTime vipStart=time(user.get("vip_start_time")),vipEnd=time(user.get("vip_end_time"));
         if(vipStart!=null && vipEnd!=null && !end.isBefore(vipStart) && end.isBefore(vipEnd)) fee=BigDecimal.ZERO;
-        if(db.update("update user set balance=balance-?,update_time=now() where id=? and balance>=?",fee,uid,fee)!=1) throw new IllegalStateException("余额不足");
+        if(db.update("update user set balance=balance-?,update_time=now() where id=? and balance-reserved_balance>=?",fee,uid,fee)!=1) throw new IllegalStateException("余额不足");
         db.update("update enter set flag=2,update_time=now() where id=? and flag=1",entry.get("id"));
         release(entry);
         db.update("insert into orders(plate_num,user_id,park_id,enter_time,exit_time,parking_duration,moneys,create_time) values(?,?,?,?,?,?,?,?)",plate,uid,parkId,start,end,minutes,fee,end);

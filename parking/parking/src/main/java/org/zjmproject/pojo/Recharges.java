@@ -19,6 +19,9 @@ public class Recharges {
     private LocalDateTime expires_at;
     private String payment_state;
     private Boolean cancel_requested;
+    private String business_type;
+    private String description;
+    private String membership_order_id;
 
     private String user_name;
 }

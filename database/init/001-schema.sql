@@ -14,6 +14,8 @@ create table user (
                       car_color varchar(20) default '' comment '车辆颜色',
                       tel_num varchar(11) default null unique comment '电话号码',
                       balance decimal(14,2) not null default 0.0 comment '账户余额',
+                      reserved_balance decimal(14,2) NOT NULL DEFAULT 0,
+                      CONSTRAINT ck_user_reserved_balance CHECK(reserved_balance>=0 AND reserved_balance<=balance),
                       status int not null default 0 comment '用户身份：0-普通，1-vip',
                       user_pic varchar(512) default '' comment '头像',
                       vip_start_time datetime default null comment '会员开始时间',
@@ -24,6 +26,33 @@ create table user (
                       check(status=0 or status=1)
 ) comment '用户表';
 
+
+CREATE TABLE IF NOT EXISTS membership_order (
+    id varchar(36) PRIMARY KEY,
+    user_id int unsigned NOT NULL,
+    request_key varchar(64) NOT NULL,
+    plan_code varchar(16) NOT NULL,
+    plan_name varchar(16) NOT NULL,
+    months int NOT NULL,
+    price decimal(14,2) NOT NULL,
+    reserved_amount decimal(14,2) NOT NULL,
+    supplement_amount decimal(14,2) NOT NULL,
+    state varchar(16) NOT NULL DEFAULT 'PENDING',
+    active_user_id int unsigned GENERATED ALWAYS AS (CASE WHEN state='PENDING' THEN user_id ELSE NULL END) STORED,
+    expires_at datetime(3) NULL,
+    starts_at datetime NULL,
+    ends_at datetime NULL,
+    renewed boolean NOT NULL DEFAULT false,
+    created_at datetime(3) NOT NULL,
+    completed_at datetime(3) NULL,
+    UNIQUE KEY uk_membership_request(user_id,request_key),
+    UNIQUE KEY uk_membership_active(active_user_id),
+    KEY idx_membership_user_time(user_id,created_at),
+    CONSTRAINT fk_membership_user FOREIGN KEY(user_id) REFERENCES user(id),
+    CHECK(state IN ('PENDING','SUCCEEDED','CLOSED')),
+    CHECK(price>0 AND reserved_amount>=0 AND supplement_amount>=0 AND reserved_amount+supplement_amount=price),
+    CHECK(months IN (1,3,12))
+) ENGINE=InnoDB;
 
 -- 管理员表
 create table admin (
@@ -139,6 +168,11 @@ create table recharges(
                       pay_method int null comment '支付方式(0-支付宝,1-微信)',
                       pay_no varchar(64) default '' comment '付款订单编号',
                       create_time datetime not null comment '充值时间',
+                      business_type varchar(24) NOT NULL DEFAULT 'NORMAL_RECHARGE',
+                      description varchar(100) NOT NULL DEFAULT '普通充值',
+                      membership_order_id varchar(36) NULL,
+                      UNIQUE KEY uk_membership_record(membership_order_id,business_type),
+                      CONSTRAINT fk_recharge_membership FOREIGN KEY(membership_order_id) REFERENCES membership_order(id),
                       merchant_order_no varchar(64) NULL,
                       expires_at datetime(3) NULL,
                       payment_state varchar(16) NOT NULL DEFAULT 'VERIFYING',

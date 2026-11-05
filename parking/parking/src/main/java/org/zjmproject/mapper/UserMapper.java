@@ -70,8 +70,8 @@ public interface UserMapper {
     @Select("select balance from user where id=#{userId}")
     BigDecimal getBalanceById(Integer userId);
 
-    @Update("update user set balance= balance-#{moneys} where id=#{userId}")
-    void deductions(Integer userId, BigDecimal moneys);
+    @Update("update user set balance=balance-#{moneys} where id=#{userId} and balance-reserved_balance>=#{moneys}")
+    int deductions(Integer userId, BigDecimal moneys);
 
     @Select("select * from user where id=#{userId}")
     User findUserByUserId(Integer userId);

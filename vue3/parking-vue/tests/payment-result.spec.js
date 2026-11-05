@@ -38,6 +38,15 @@ const stubs = Object.fromEntries(
     'ElDialog',
   ].map((n) => [n, slot]),
 )
+
+it('does not clear a newer ambiguous purchase when an older supplement arrives late', async () => {
+  const attempt = JSON.stringify({ planCode: 'YEARLY', key: 'newer-purchase-key-1234' })
+  sessionStorage.setItem('parking-membership:1', attempt)
+  request.post.mockResolvedValueOnce({ data: { id: 7, amounts: 88, paymentState: 'PAID', membershipOrder: { state: 'CLOSED' } } })
+  await setup()
+  expect(sessionStorage.getItem('parking-membership:1')).toBe(attempt)
+  expect(feedback.success).toHaveBeenCalledWith('补款已转入余额，可重新购买会员')
+})
 beforeEach(() => {
   vi.useFakeTimers()
   vi.clearAllMocks()

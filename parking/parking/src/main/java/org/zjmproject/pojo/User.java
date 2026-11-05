@@ -31,6 +31,10 @@ public class User {
     @Pattern(regexp = "^1[3-9]\\d{9}$")
     private String tel_num;//电话
     private BigDecimal balance;//账户余额
+    private BigDecimal reserved_balance = BigDecimal.ZERO;
+    public BigDecimal getAvailable_balance() {
+        return balance == null ? BigDecimal.ZERO : balance.subtract(reserved_balance == null ? BigDecimal.ZERO : reserved_balance);
+    }
     private int status;//身份
     private String user_pic;//用户头像
     private LocalDateTime vip_start_time;//vip开始时间

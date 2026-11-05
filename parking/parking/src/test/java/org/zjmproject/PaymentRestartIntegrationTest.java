@@ -20,19 +20,29 @@ import static org.junit.jupiter.api.Assertions.*;
     "spring.data.redis.port=${TEST_REDIS_PORT}","parking.integrations.alipay=true","alipay.app-id=integration-app"})
 class PaymentRestartIntegrationTest {
     @TestConfiguration static class Provider {
-        @Bean @Primary AliPayService restartProvider(Clock clock) {return new AliPayService() {
+        @Bean @Primary AliPayService restartProvider(Clock clock, JdbcTemplate db) {return new AliPayService() {
             public FormContent<String> pay(Integer id){throw new UnsupportedOperationException();}
             public Map<String,String> rechargePayNotify(jakarta.servlet.http.HttpServletRequest r){return null;}
             public boolean close(String no){return false;}
-            public PaymentTrade query(String no){return no.startsWith("RST")?new PaymentTrade(no,"trade-"+no,"TRADE_SUCCESS",BigDecimal.TEN,LocalDateTime.now(clock)):new PaymentTrade(no,null,"NOT_FOUND",null,null);}
+            public PaymentTrade query(String no){
+                if(no.startsWith("RST")) return new PaymentTrade(no,"trade-"+no,"TRADE_SUCCESS",BigDecimal.TEN,LocalDateTime.now(clock));
+                var amounts=db.queryForList("select r.amounts from recharges r join user u on u.id=r.user_id where r.merchant_order_no=? and r.business_type='MEMBERSHIP_TOPUP' and u.user_name='membership-restart'",BigDecimal.class,no);
+                return amounts.isEmpty()?new PaymentTrade(no,null,"NOT_FOUND",null,null):new PaymentTrade(no,"trade-"+no,"TRADE_SUCCESS",amounts.get(0),LocalDateTime.now(clock));
+            }
         };}
     }
     @Autowired JdbcTemplate db;
     @Autowired org.redisson.api.RedissonClient redis;
     @Autowired Clock clock;
+    @Autowired MembershipService membership;
+    @org.springframework.test.context.bean.override.mockito.MockitoSpyBean PaymentQueue queue;
+    @BeforeEach void isolate() {
+        assertTrue(Set.of("parking-payment-verification","parking-membership-verification").contains(System.getenv("PARKING_COMPOSE_PROJECT")));
+        if("CREATE".equals(System.getenv("PARKING_PAYMENT_RESTART_PHASE")))
+            org.mockito.Mockito.doNothing().when(queue).scheduled(org.mockito.ArgumentMatchers.any());
+    }
     @Test @EnabledIfEnvironmentVariable(named="PARKING_PAYMENT_RESTART_PHASE",matches="CREATE")
     void createInterruptedDurableWork() {
-        assertEquals("parking-payment-verification",System.getenv("PARKING_COMPOSE_PROJECT"));
         String name="pay-restart-fixture";assertEquals(0,db.queryForObject("select count(*) from user where user_name=?",Integer.class,name));
         db.update("insert into user(user_name,password,balance,create_time,update_time) values(?,'test-only',20,now(),now())",name);
         int user=db.queryForObject("select id from user where user_name=?",Integer.class,name);
@@ -41,17 +51,34 @@ class PaymentRestartIntegrationTest {
         db.update("insert into payment_event(recharge_id,next_run_at,lease_token,lease_until) values(?,?,'interrupted',?)",id,LocalDateTime.now(clock).plusSeconds(5),LocalDateTime.now(clock).plusSeconds(5));
         redis.<String>getDeque(PaymentQueue.PROCESSING).add(id+":1");
         assertEquals("VERIFYING",db.queryForObject("select payment_state from recharges where id=?",String.class,id));
+        db.update("insert into user(user_name,password,balance,create_time,update_time) values('membership-restart','test-only',100,now(),now())");
+        int member=db.queryForObject("select id from user where user_name='membership-restart'",Integer.class);
+        var order=membership.create(member,"MONTHLY",UUID.randomUUID().toString());
+        db.update("update payment_event set next_run_at=?,lease_token='interrupted',lease_until=? where recharge_id=?",LocalDateTime.now(clock).plusSeconds(5),LocalDateTime.now(clock).plusSeconds(5),order.rechargeId());
+        redis.<String>getDeque(PaymentQueue.PROCESSING).add(order.rechargeId()+":1");
+        assertEquals(new BigDecimal("100.00"),db.queryForObject("select reserved_balance from user where id=?",BigDecimal.class,member));
     }
     @Test @EnabledIfEnvironmentVariable(named="PARKING_PAYMENT_RESTART_PHASE",matches="VERIFY")
     void aNewApplicationProcessRestoresAndCreditsExactlyOnce() throws Exception {
         int user=db.queryForObject("select id from user where user_name='pay-restart-fixture'",Integer.class);
         int id=db.queryForObject("select id from recharges where user_id=?",Integer.class,user);
+        int member=db.queryForObject("select id from user where user_name='membership-restart'",Integer.class);
         try {
             long until=System.nanoTime()+TimeUnit.SECONDS.toNanos(25);
             while(System.nanoTime()<until && db.queryForObject("select flag from recharges where id=?",Integer.class,id)!=1) Thread.sleep(100);
             assertEquals(1,db.queryForObject("select flag from recharges where id=?",Integer.class,id));
             assertEquals(0,new BigDecimal("30").compareTo(db.queryForObject("select balance from user where id=?",BigDecimal.class,user)));
             assertNotNull(db.queryForObject("select completed_at from payment_event where recharge_id=?",Object.class,id));
-        } finally {db.update("delete from recharges where user_id=?",user);db.update("delete from user where id=?",user);}
+            long memberDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(25);
+            while(System.nanoTime()<memberDeadline && !"SUCCEEDED".equals(db.queryForObject("select state from membership_order where user_id=?",String.class,member))) Thread.sleep(100);
+            assertEquals("SUCCEEDED",db.queryForObject("select state from membership_order where user_id=?",String.class,member));
+            assertEquals(new BigDecimal("0.00"),db.queryForObject("select balance from user where id=?",BigDecimal.class,member));
+            assertEquals(new BigDecimal("0.00"),db.queryForObject("select reserved_balance from user where id=?",BigDecimal.class,member));
+            assertEquals(2,db.queryForObject("select count(*) from recharges where user_id=?",Integer.class,member));
+        } finally {
+            db.update("delete from recharges where user_id in (?,?)",user,member);
+            db.update("delete from membership_order where user_id=?",member);
+            db.update("delete from user where id in (?,?)",user,member);
+        }
     }
 }

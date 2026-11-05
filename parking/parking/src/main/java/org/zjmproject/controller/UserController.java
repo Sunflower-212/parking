@@ -26,7 +26,6 @@ import org.zjmproject.service.AliPayService;
 import org.zjmproject.service.RechargesService;
 import org.zjmproject.service.UserService;
 import org.zjmproject.service.PaymentService;
-import org.zjmproject.service.MembershipService;
 import org.zjmproject.service.AccessGuard;
 import org.zjmproject.service.PlateUploadService;
 import org.zjmproject.utils.AliOssUtil;
@@ -48,7 +47,6 @@ import java.util.concurrent.TimeUnit;
 public class UserController {
     @Autowired private org.zjmproject.service.AuditService audits;
     @Autowired private PaymentService payments;
-    @Autowired private MembershipService membership;
     @Autowired private org.springframework.jdbc.core.JdbcTemplate db;
     @org.springframework.beans.factory.annotation.Value("${parking.integrations.oss:false}") private boolean ossEnabled;
     @Autowired
@@ -263,9 +261,9 @@ public class UserController {
     }
 
     @PatchMapping("/getVip")
-    public Result getVip(@RequestParam Integer days) {membership.change(AccessGuard.userId(),days,false);return Result.success();}
+    public Result getVip() {AccessGuard.userId();return Result.error("请刷新页面选择会员套餐");}
     @PatchMapping("/vipRenewal")
-    public Result vipRenewal(@RequestParam Integer days) {membership.change(AccessGuard.userId(),days,true);return Result.success();}
+    public Result vipRenewal() {AccessGuard.userId();return Result.error("请刷新页面选择会员套餐");}
 
     //充值
     @PostMapping("/recharge")

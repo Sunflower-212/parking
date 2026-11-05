@@ -5,6 +5,7 @@ import request from '@/utils/request'
 import useUser from '@/stores/userInfo'
 import { rechargeId, pendingPayment, clearPayment } from '@/utils/payment-context'
 import { feedback } from '@/utils/request-error-notice'
+import { paymentSuccessMessage } from '@/utils/membership'
 import PageShell from '@/components/PageShell.vue'
 import { money } from '@/utils/format'
 
@@ -23,7 +24,9 @@ let controller,
   version = 0
 const title = computed(() =>
   status.value?.paymentState === 'PAID'
-    ? '充值已到账'
+    ? status.value.membershipOrder
+      ? paymentSuccessMessage(status.value)
+      : '充值已到账'
     : status.value?.paymentState === 'CLOSED'
       ? '充值单已关闭'
       : waiting.value
@@ -50,11 +53,11 @@ async function finish(own) {
     if (disposed || controller !== own) return
     user.setInfo(result.data)
     clearPayment(user.info.id, id.value)
-    feedback.success('充值成功，余额已更新')
+    feedback.success(paymentSuccessMessage(status.value))
     await router.replace('/user/account')
   } catch {
     if (!disposed && controller === own && !own.signal.aborted)
-      error.value = '充值已到账，账户刷新失败，请重试'
+      error.value = `${status.value?.membershipOrder ? paymentSuccessMessage(status.value) : '充值已到账'}，账户刷新失败，请重试`
   }
 }
 async function load(active = false) {

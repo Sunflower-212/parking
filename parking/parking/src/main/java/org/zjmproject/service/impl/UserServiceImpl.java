@@ -87,7 +87,7 @@ public class UserServiceImpl implements UserService {
 
     @Override
     public void getVip(Integer id,Integer days) {
-        userMapper.updateVipData(id,LocalDateTime.now(clock),LocalDateTime.now(clock).plusDays(days));
+        throw new IllegalStateException("请刷新页面选择会员套餐");
     }
 
     @Override
@@ -97,12 +97,12 @@ public class UserServiceImpl implements UserService {
 
     @Override
     public void vipRenewal(Integer id, Integer days, LocalDateTime vipEndTime) {
-        userMapper.vipRenewal(id,vipEndTime.plusDays(days));
+        throw new IllegalStateException("请刷新页面选择会员套餐");
     }
 
     @Override
     public void newVipRenewal(Integer id, Integer days, LocalDateTime vipStartTime, LocalDateTime vipEndTime) {
-        userMapper.newVipRenewal(id,vipStartTime,vipStartTime.plusDays(days));
+        throw new IllegalStateException("请刷新页面选择会员套餐");
     }
 
     @Override
@@ -137,7 +137,8 @@ public class UserServiceImpl implements UserService {
 
     @Override
     public void deductions(Integer userId, BigDecimal moneys) {
-        userMapper.deductions(userId,moneys);
+        if (moneys == null || moneys.signum() < 0) throw new IllegalArgumentException("扣费金额无效");
+        if (userMapper.deductions(userId,moneys) != 1) throw new IllegalStateException("可用余额不足");
     }
 
     @Override

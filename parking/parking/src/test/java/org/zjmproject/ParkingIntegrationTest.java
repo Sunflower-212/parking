@@ -32,6 +32,7 @@ class ParkingIntegrationTest {
     @Autowired ReservationQueue queue;
     @Autowired org.redisson.api.RedissonClient stateRedis;
     @Autowired PaymentService payments;
+    @org.springframework.test.context.bean.override.mockito.MockitoBean AliPayService alipay;
     @Autowired OrdersService orders;
     @Autowired TestRestTemplate http;
     @Autowired Clock clock;
@@ -57,6 +58,7 @@ class ParkingIntegrationTest {
     }
     @AfterEach void cleanup() {
         db.update("delete from recharges where user_id in (?,?)",user,user2);
+        db.update("delete from membership_order where user_id in (?,?)",user,user2);
         db.update("delete from orders where user_id in (?,?)",user,user2);
         db.update("delete from reservation_event where reservation_id in (select id from enter where user_id in (?,?))",user,user2);
         db.update("delete from enter where user_id in (?,?)",user,user2);
@@ -256,9 +258,34 @@ class ParkingIntegrationTest {
         List<Map> states=(List<Map>)get("/spaces/availability?park_id="+park+"&spaces_storey=1",auth).getBody().get("data");assertEquals(1,((Number)states.stream().filter(r->((Number)r.get("id")).intValue()==space).findFirst().orElseThrow().get("spaces_flag")).intValue());
     }
     @Test void concurrentMembershipRenewalsAccumulateInsteadOfOverwriting() throws Exception {
-        membership.change(user,30,false);LocalDateTime before=db.queryForObject("select vip_end_time from user where id=?",LocalDateTime.class,user);
-        var pool=Executors.newFixedThreadPool(2);try{var a=pool.submit(()->membership.change(user,10,true));var b=pool.submit(()->membership.change(user,10,true));a.get(5,TimeUnit.SECONDS);b.get(5,TimeUnit.SECONDS);}finally{pool.shutdownNow();}
-        assertEquals(before.plusDays(20),db.queryForObject("select vip_end_time from user where id=?",LocalDateTime.class,user));
+        db.update("update user set balance=2000 where id=?", user);
+        membership.create(user,"MONTHLY",UUID.randomUUID().toString());
+        LocalDateTime before=db.queryForObject("select vip_end_time from user where id=?",LocalDateTime.class,user);
+        var pool=Executors.newFixedThreadPool(2);
+        try {
+            var a=pool.submit(()->membership.create(user,"MONTHLY",UUID.randomUUID().toString()));
+            var b=pool.submit(()->membership.create(user,"MONTHLY",UUID.randomUUID().toString()));
+            a.get(5,TimeUnit.SECONDS);b.get(5,TimeUnit.SECONDS);
+        } finally { pool.shutdownNow(); }
+        assertEquals(before.plusMonths(1).plusMonths(1),db.queryForObject("select vip_end_time from user where id=?",LocalDateTime.class,user));
+        assertEquals(0,new BigDecimal("1436.00").compareTo(db.queryForObject("select balance from user where id=?",BigDecimal.class,user)));
+    }
+
+    @Test void parkingExitRacingMembershipCannotSpendReservedMoney() throws Exception {
+        db.update("update user set balance=100 where id=?",user);
+        flow.enter(plate,park);
+        db.update("update enter set enter_time=? where user_id=? and flag=1",LocalDateTime.now(clock).minusMinutes(70),user);
+        var pool=Executors.newFixedThreadPool(2);var start=new CountDownLatch(1);
+        try {
+            var purchase=pool.submit(()->{start.await();return membership.create(user,"MONTHLY",UUID.randomUUID().toString());});
+            var exit=pool.submit(()->{start.await();try {flow.exit(plate,park);return true;}catch(IllegalStateException insufficient){assertTrue(insufficient.getMessage().contains("余额不足"));return false;}});
+            start.countDown();var order=purchase.get(10,TimeUnit.SECONDS);boolean exited=exit.get(10,TimeUnit.SECONDS);
+            BigDecimal expected=new BigDecimal(exited?"95.00":"100.00");
+            assertEquals(expected,order.reservedAmount());
+            assertEquals(expected,db.queryForObject("select balance from user where id=?",BigDecimal.class,user));
+            assertEquals(expected,db.queryForObject("select reserved_balance from user where id=?",BigDecimal.class,user));
+            assertEquals(exited?2:1,available());
+        } finally {pool.shutdownNow();}
     }
     @Test void cacheInvalidationHappensAfterCommitAndNotAfterRollback() {
         String resource="it:"+prefix;var count=new java.util.concurrent.atomic.AtomicInteger();var type=new com.fasterxml.jackson.core.type.TypeReference<Map<String,Integer>>(){};

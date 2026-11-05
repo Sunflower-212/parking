@@ -143,7 +143,8 @@ export const pages = {
     columns: [
       text('id', '充值单号'),
       text('user_name', '用户名'),
-      { key: 'amounts', label: '金额', money: true },
+      { key: 'amounts', label: '金额', money: true, flow: true },
+      text('description', '描述'),
       status('flag', '支付状态', 'payment'),
       text('pay_no', '支付单号'),
       date('create_time', '创建时间'),
@@ -178,7 +179,8 @@ export const pages = {
     ],
     columns: [
       text('id', '充值单号'),
-      { key: 'amounts', label: '金额', money: true },
+      { key: 'amounts', label: '金额', money: true, flow: true },
+      text('description', '描述'),
       status('flag', '状态', 'payment'),
       text('pay_no', '支付单号'),
       date('create_time', '创建时间'),

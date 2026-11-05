@@ -25,7 +25,7 @@ try {
     }
     docker @composeArgs stop backend frontend
     if ($LASTEXITCODE -ne 0) { throw 'Could not stop verification writers before migration' }
-    foreach($name in @('004-capacity.sql','005-background-tasks.sql','006-capacity-buckets.sql','007-observability.sql','008-payment-lifecycle.sql')) {
+    foreach($name in @('004-capacity.sql','005-background-tasks.sql','006-capacity-buckets.sql','007-observability.sql','008-payment-lifecycle.sql','009-membership-purchase.sql')) {
         $source="SET @capacity_buckets=$CapacityBuckets;`n"+(Get-Content (Join-Path 'database/migrations' $name) -Raw)
         $source | docker @composeArgs exec -T mysql sh -c 'MYSQL_PWD="$MYSQL_PASSWORD" mysql -u"$MYSQL_USER" parking_springboot'
         if($LASTEXITCODE -ne 0){throw "Verification migration failed: $name"}
@@ -40,6 +40,8 @@ try {
     finally { Pop-Location }
     python scripts/test-migration.py
     if ($LASTEXITCODE -ne 0) { throw 'Migration verification failed' }
+    python scripts/test-membership-migration.py
+    if ($LASTEXITCODE -ne 0) { throw 'Membership migration verification failed' }
     Push-Location vue3/parking-vue
     try {
         npm ci

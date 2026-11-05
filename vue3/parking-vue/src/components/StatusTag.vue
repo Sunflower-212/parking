@@ -14,6 +14,7 @@ const baseState = computed(
         VERIFYING: ['核验中', 'warning'],
         CLOSING: ['关单中', 'warning'],
         PAID: ['已到账', 'success'],
+        DEBIT: ['已扣费', 'success'],
         CLOSED: ['已关闭', 'info'],
         REVIEW: ['待核验', 'warning'],
         0: ['未支付', 'warning'],

@@ -208,14 +208,21 @@ onBeforeUnmount(() => {
         ><template #default="{ row }"
           ><StatusTag
             v-if="col.kind"
-            :value="col.kind === 'payment' ? row.payment_state || row[col.key] : row[col.key]"
+            :value="
+              col.kind === 'payment'
+                ? row.business_type === 'MEMBERSHIP_DEBIT'
+                  ? 'DEBIT'
+                  : row.payment_state || row[col.key]
+                : row[col.key]
+            "
             :kind="col.kind"
             :reservation="col.kind === 'entry' ? row.reservation : undefined"
           /><span v-else>{{
             col.date
               ? dateTime(row[col.key])
               : col.money
-                ? money(row[col.key])
+                ? (col.flow ? (row.business_type === 'MEMBERSHIP_DEBIT' ? '−' : '+') : '') +
+                  money(row[col.key])
                 : (row[col.key] ?? '—')
           }}</span></template
         ></el-table-column
@@ -228,7 +235,12 @@ onBeforeUnmount(() => {
         fixed="right"
         ><template #default="{ row }">
           <el-button
-            v-if="page === 'userRecharges' && row.flag !== 1 && row.payment_state !== 'CLOSED'"
+            v-if="
+              page === 'userRecharges' &&
+              row.business_type !== 'MEMBERSHIP_DEBIT' &&
+              row.flag !== 1 &&
+              row.payment_state !== 'CLOSED'
+            "
             link
             type="primary"
             @click="paymentRouter.push(paymentPath(row.id))"
