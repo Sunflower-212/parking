@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { jwtDecode } from 'jwt-decode'
 import { ElMessageBox } from 'element-plus'
@@ -11,6 +11,7 @@ import useAdmin from '@/stores/adminInfo'
 import useUser from '@/stores/userInfo'
 import { roleName } from '@/utils/format'
 import StatusTag from '@/components/StatusTag.vue'
+import defaultAvatar from '@/assets/default.png'
 const props = defineProps({ admin: Boolean })
 const route = useRoute(),
   router = useRouter(),
@@ -29,6 +30,14 @@ const role = computed(() => {
   }
 })
 const info = computed(() => (props.admin ? adminStore.info : userStore.info))
+const avatarFailed = ref(false)
+const avatar = computed(() => (!avatarFailed.value && info.value.user_pic) || defaultAvatar)
+watch(
+  () => info.value.user_pic,
+  () => {
+    avatarFailed.value = false
+  },
+)
 const menu = computed(() =>
   props.admin
     ? [
@@ -61,7 +70,10 @@ const menu = computed(() =>
 )
 const prefix = computed(() => (props.admin ? '/admin/' : '/user/'))
 const title = computed(
-  () => route.meta.title || menu.value.find((m) => route.path === prefix.value + m[0])?.[1] || '停车管理',
+  () =>
+    route.meta.title ||
+    menu.value.find((m) => route.path === prefix.value + m[0])?.[1] ||
+    '停车管理',
 )
 async function load() {
   loading.value = true
@@ -140,9 +152,21 @@ onMounted(load)
           >
         </div>
         <div class="profile">
+          <img
+            v-if="!admin"
+            :key="info.user_pic"
+            class="profile-avatar"
+            :src="avatar"
+            alt="用户头像"
+            width="32"
+            height="32"
+            @error="avatarFailed = true"
+          />
           <el-tag v-if="admin" size="small">{{ roleName(role) }}</el-tag>
           <StatusTag v-else :value="info.status ?? 0" kind="member" size="small" />
-          <span>{{ info.admin_name || info.user_name || '加载中' }}</span>
+          <span class="profile-name" :title="info.admin_name || info.user_name">{{
+            info.admin_name || info.user_name || '加载中'
+          }}</span>
           <el-button text :icon="SwitchButton" aria-label="退出登录" @click="logout" />
         </div>
       </header>

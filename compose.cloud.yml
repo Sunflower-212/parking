@@ -179,7 +179,7 @@ services:
         condition: service_healthy
     logging: *id001
     restart: unless-stopped
-    image: parking-frontend:cloud-membership-v1
+    image: parking-frontend:cloud-membership-avatar-v2
     networks:
       default: {}
       web-entry:

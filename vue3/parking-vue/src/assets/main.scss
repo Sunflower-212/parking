@@ -165,6 +165,28 @@ a:focus-visible {
 .profile {
   font-size: 13px;
   white-space: nowrap;
+  flex-shrink: 0;
+}
+.profile-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+.profile-name {
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.topbar-left,
+.breadcrumb {
+  min-width: 0;
+}
+.breadcrumb strong {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 .mobile-toggle {
   display: none !important;
@@ -387,7 +409,7 @@ a:focus-visible {
     font-size: 12px;
   }
   .breadcrumb > .el-icon,
-  .profile > span {
+  .profile-name {
     display: none;
   }
   .main-content {
