@@ -69,7 +69,11 @@ async function changeType(value) {
         confirmButtonText: '继续',
         cancelButtonText: '取消',
       })
-    const prefix = legacy.value ? ['', ''] : cells.value.slice(0, 2)
+    const prefix = legacy.value
+      ? [0, 1].map((i) =>
+          plateCharacters(value, i).includes(legacy.value[i]) ? legacy.value[i] : '',
+        )
+      : cells.value.slice(0, 2)
     type.value = value
     cells.value = [
       ...prefix,

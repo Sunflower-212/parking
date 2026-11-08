@@ -105,4 +105,8 @@ it('infers supported types and preserves unsupported historical values', async (
   expect(wrapper.get('.plate-legacy').text()).toContain('旧车牌-123456789')
   expect(wrapper.emitted('update:modelValue')).toBeUndefined()
   expect(wrapper.vm.validate()).toBe(false)
+  await wrapper.setProps({ modelValue: '皖H-123456789' })
+  vi.spyOn(ElMessageBox, 'confirm').mockResolvedValueOnce('confirm')
+  await change('small')
+  expect(wrapper.props('modelValue')).toBe('皖H-      ')
 })
