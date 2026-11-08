@@ -137,7 +137,7 @@ defineExpose({ validate })
         <button
           type="button"
           :data-cell="index"
-          :class="{ selected: opened && active === index }"
+          :class="{ selected: opened && active === index, placeholder: !cell && index === 0 }"
           :aria-label="'车牌第' + (index + 1) + '位：' + (cell || '未选择')"
           :aria-pressed="opened && active === index"
           :disabled="disabled"
@@ -208,6 +208,10 @@ defineExpose({ validate })
 .plate-cells.energy button {
   background: #f0faf4;
   border-color: #bddcc9;
+}
+.plate-cells button.placeholder {
+  color: #9aa6b7;
+  font-weight: 400;
 }
 .plate-cells button.selected {
   border: 2px solid #2563eb;

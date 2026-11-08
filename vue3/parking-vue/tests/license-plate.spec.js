@@ -52,9 +52,12 @@ it('matches backend fixtures for all 31 provinces and three structures', () => {
 })
 it('restricts keys by position and limits ordinary suffix to two letters', async () => {
   mountPlate()
+  expect(wrapper.get('[data-cell="0"]').classes()).toContain('placeholder')
+  expect(wrapper.props('modelValue')).toBe('')
   await wrapper.get('[data-cell="0"]').trigger('click')
   expect(wrapper.findAll('.plate-keys button')).toHaveLength(31)
   await key('皖')
+  expect(wrapper.get('[data-cell="0"]').classes()).not.toContain('placeholder')
   expect(wrapper.find('[aria-label="输入I"]').exists()).toBe(false)
   expect(wrapper.find('[aria-label="输入1"]').exists()).toBe(false)
   for (const c of 'HAB123') await key(c)
