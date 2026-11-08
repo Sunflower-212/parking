@@ -409,7 +409,7 @@ defineExpose({ fit, focus })
           cursor: editing && tool !== 'pan' ? 'crosshair' : 'grab',
         }"
         role="img"
-        aria-label="停车场二维地图，可拖动缩放，也可使用位置列表进行键盘操作"
+        aria-label="停车场二维地图，可点击车位查看详情或拖动缩放"
         @pointerdown="down"
         @pointermove="move"
         @pointerup="up"

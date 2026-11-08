@@ -477,6 +477,9 @@ function visibility() {
     }, 15000)
   }
 }
+function reservationChanged() {
+  if (!props.admin && !disposed) refresh(true)
+}
 function beforeUnload(e) {
   if (dirty.value || busy.value || uncertain.value) {
     e.preventDefault()
@@ -489,6 +492,7 @@ onMounted(async () => {
   if (disposed) return
   document.addEventListener('visibilitychange', visibility)
   window.addEventListener('beforeunload', beforeUnload)
+  window.addEventListener('parking-reservation-changed', reservationChanged)
   timer = setInterval(() => {
     if (!document.hidden && !busy.value && !refreshing.value) refresh(true)
   }, 15000)
@@ -500,12 +504,15 @@ onBeforeUnmount(() => {
   clearInterval(timer)
   document.removeEventListener('visibilitychange', visibility)
   window.removeEventListener('beforeunload', beforeUnload)
+  window.removeEventListener('parking-reservation-changed', reservationChanged)
 })
-watch([filter, onlyFree], () => (listPage.value = 1))
-watch(
-  () => filtered.value.length,
-  (n) => (listPage.value = Math.min(listPage.value, Math.max(1, Math.ceil(n / 20)))),
-)
+if (props.admin) {
+  watch([filter, onlyFree], () => (listPage.value = 1))
+  watch(
+    () => filtered.value.length,
+    (n) => (listPage.value = Math.min(listPage.value, Math.max(1, Math.ceil(n / 20)))),
+  )
+}
 watch(selectedCell, (c) => {
   editName.value = c?.spaces_name || ''
   editType.value = c ? kind(c) : 0
@@ -523,7 +530,8 @@ watch(
   <PageShell :title="admin ? '车位管理' : '车位预约'">
     <template #actions
       ><HelpPopover
-        ><p>拖动平移，滚轮或双指缩放；列表可搜索并定位位置。</p>
+        ><p>点击车位查看详情，拖动平移，滚轮或双指缩放。</p>
+        <p v-if="admin">列表可搜索并定位位置。</p>
         <p v-if="admin">
           编辑时可框选、连续绘制和批量生成。绿虚线为新增、黄为修改、红为删除；Shift 追加选择。
         </p>
@@ -754,7 +762,7 @@ watch(
         >预览并保存</el-button
       >
     </div>
-    <section class="surface space-list">
+    <section v-if="admin" class="surface space-list">
       <div class="list-heading">
         <div>
           <h2>位置列表</h2>

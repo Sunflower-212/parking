@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { CELL, fitView } from '../src/utils/map-geometry.js'
 const stamp = Date.now().toString().slice(-7),
   admin = 'ea' + stamp,
   user = 'eu' + stamp,
@@ -319,7 +320,17 @@ test('user reserves once, cancels, and sees responsive pages and current account
   await login(page, user, user)
   await page.getByRole('combobox', { name: '停车场', exact: true }).press('Enter')
   await page.getByRole('option', { name: park, exact: true }).click()
-  await page.getByRole('button', { name: '选择', exact: true }).first().click()
+  await expect(page.locator('.space-list')).toHaveCount(0)
+  await expect(page.locator('.map-metrics strong').nth(2)).toHaveText('1')
+  await page.getByRole('button', { name: '适配全图', exact: true }).click()
+  const canvas = page.locator('canvas')
+  const bounds = await canvas.boundingBox()
+  const view = fitView([{ spaces_row: 1, spaces_col: 1 }], bounds.width, bounds.height)
+  await canvas.click({ position: {
+    x: view.offset.x + CELL * view.scale / 2,
+    y: view.offset.y + CELL * view.scale / 2,
+  } })
+  await expect(page.locator('.space-inspector h2')).toHaveText('A1')
   await page.getByRole('button', { name: '确认预约', exact: true }).click()
   await expect(page.getByText(/预约到期：/)).toBeVisible()
   await page.reload()

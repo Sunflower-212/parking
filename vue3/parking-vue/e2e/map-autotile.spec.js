@@ -49,6 +49,7 @@ function parking() {
 async function setup(page, initial, role = 1) {
   let snapshot = { revision: 'fixture-1', items: initial.map((c) => ({ ...c })) }
   let saves = 0
+  let reservedId = null
   const unexpected = [],
     errors = []
   page.on('pageerror', (error) => errors.push(error.message))
@@ -73,8 +74,27 @@ async function setup(page, initial, role = 1) {
       data = [{ id: 1, park_name: '自动拼接验收', park_storey: 1 }]
     else if (path === 'spaces/editor') data = snapshot
     else if (['spaces/layout', 'spaces/availability'].includes(path)) data = snapshot.items
-    else if (path === 'enter/userEnterOrReservation') data = []
-    else if (path === 'spaces/layout/batch') {
+    else if (path === 'enter/userEnterOrReservation')
+      data = reservedId
+        ? [
+            {
+              id: 1,
+              park_name: '自动拼接验收',
+              flag: 0,
+              reservation: 1,
+              expires_at: '2099-12-31T12:00:00',
+            },
+          ]
+        : []
+    else if (path === 'enter/reservation') {
+      reservedId = route.request().postDataJSON().id
+      snapshot.items.find((cell) => cell.id === reservedId).spaces_flag = 1
+      data = null
+    } else if (path === 'enter/cancelReservation') {
+      snapshot.items.find((cell) => cell.id === reservedId).spaces_flag = 0
+      reservedId = null
+      data = null
+    } else if (path === 'spaces/layout/batch') {
       const body = route.request().postDataJSON()
       expect(body.baseRevision).toBe(snapshot.revision)
       saves++
@@ -96,7 +116,14 @@ async function setup(page, initial, role = 1) {
   const path = role === -1 ? 'user/spaceReservation' : 'admin/spaceManagement'
   await page.goto(`${appBase}${path}`)
   await expect(page.locator('canvas')).toBeVisible()
-  await expect(page.getByRole('cell', { name: initial[0].spaces_name, exact: true })).toBeVisible()
+  if (role === -1) {
+    await expect(page.locator('.space-list')).toHaveCount(0)
+    await expect(page.locator('.map-metrics strong').nth(2)).toHaveText(String(initial.filter(c => c.spaces_flag < 2).length))
+  }
+  else
+    await expect(
+      page.getByRole('cell', { name: initial[0].spaces_name, exact: true }),
+    ).toBeVisible()
   return {
     get snapshot() {
       return snapshot
@@ -273,20 +300,28 @@ test('editing a branch, undo/redo, saving and reloading preserve adaptive connec
   expect(fixture.unexpected).toEqual([])
 })
 
-test('user selection remains available on the shared map', async ({ page }) => {
-  const fixture = await setup(page, parking(), -1)
-  await page.getByPlaceholder('搜索位置名称').fill('P3-2')
-  await page
-    .getByRole('row')
-    .filter({ hasText: 'P3-2' })
-    .getByRole('button', { name: '选择', exact: true })
-    .click()
-  await expect(page.locator('.space-inspector h2')).toHaveText('P3-2')
-  await expect(page.getByRole('button', { name: '确认预约', exact: true })).toBeEnabled()
-  await page.locator('.parking-map').screenshot({ path: resolve(evidence, 'user-map.png') })
-  expect(fixture.unexpected).toEqual([])
-  expect(fixture.errors).toEqual([])
-})
+for (const width of [375, 768, 1440])
+  test(`user map-only selection and reservation at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 })
+    const fixture = await setup(page, parking(), -1)
+    await expect(page.getByPlaceholder('搜索位置名称')).toHaveCount(0)
+    await expect(page.locator('.map-pagination')).toHaveCount(0)
+    await fit(page)
+    await page.locator('canvas').click({ position: await point(page, parking(), 3, 2) })
+    await expect(page.locator('.space-inspector h2')).toHaveText('P3-2')
+    await expect(page.getByRole('button', { name: '确认预约', exact: true })).toBeEnabled()
+    await page.getByRole('button', { name: '确认预约', exact: true }).click()
+    await expect(page.getByText(/预约到期：/)).toBeVisible()
+    await page.getByRole('button', { name: '取消预约', exact: true }).click()
+    await page.getByRole('button', { name: '确认取消', exact: true }).click()
+    await expect(page.locator('.active-booking')).toHaveCount(0)
+    await expect(page.locator('.el-message-box')).not.toBeVisible()
+    await expect(page.locator('.el-message')).toHaveCount(0)
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+    await page.screenshot({ path: resolve(evidence, `user-map-only-${width}.png`), fullPage: true })
+    expect(fixture.unexpected).toEqual([])
+    expect(fixture.errors).toEqual([])
+  })
 
 test('ordinary administrator keeps the same editing tools and adaptive map', async ({ page }) => {
   const fixture = await setup(page, parking(), 0)

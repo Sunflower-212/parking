@@ -59,6 +59,36 @@ beforeEach(() => {
   ElMessageBox.confirm.mockResolvedValue('confirm')
 })
 afterEach(() => wrapper?.unmount())
+it.each([false, true])(
+  'renders the position list only for administrators (admin=%s)',
+  async (admin) => {
+    request.get.mockImplementation((url) =>
+      Promise.resolve({
+        data:
+          url === '/parking/catalog'
+            ? [{ id: 1, park_storey: 1 }]
+            : url === '/spaces/editor'
+              ? snapshot
+              : url === '/enter/userEnterOrReservation'
+                ? []
+                : [cell],
+      }),
+    )
+    wrapper = shallowMount(SpaceWorkspace, {
+      props: { admin },
+      global: {
+        ...options.global,
+        stubs: {
+          ...options.global.stubs,
+          PageShell: { template: '<div><slot /><slot name="actions" /></div>' },
+        },
+      },
+    })
+    await flushPromises()
+    expect(wrapper.find('.space-list').exists()).toBe(admin)
+    expect(wrapper.findComponent({ name: 'ParkingMap' }).exists()).toBe(true)
+  },
+)
 it('cancels and ignores old floor responses, including after unmount', async () => {
   const vm = await mount(),
     pending = []
@@ -124,4 +154,18 @@ it('requires explicit discard before switching floors and keeps drafts on cancel
   await vm.changeFloor(2)
   expect(vm.floor).toBe(2)
   expect(vm.editing).toBe(false)
+})
+
+it('reservation events refresh the user map and are detached on unmount',async()=>{
+  let occupied=false
+  request.get.mockImplementation(url=>Promise.resolve({data:url==='/parking/catalog'?[{id:1,park_storey:1}]:url==='/enter/userEnterOrReservation'?(occupied?[{id:3,flag:0,reservation:1}]:[]):[{...cell,spaces_flag:occupied?1:0}]}))
+  wrapper=shallowMount(SpaceWorkspace,{props:{admin:false},...options});await flushPromises()
+  occupied=true;window.dispatchEvent(new Event('parking-reservation-changed'));await flushPromises()
+  expect(wrapper.vm.server.items[0].spaces_flag).toBe(1);expect(wrapper.vm.active).toHaveLength(1)
+  wrapper.unmount();request.get.mockClear();window.dispatchEvent(new Event('parking-reservation-changed'));await flushPromises();expect(request.get).not.toHaveBeenCalled()
+})
+it('AI reservation events do not replace administrator editing drafts',async()=>{
+  const vm=await mount();await vm.startEdit();const before=vm.draft;request.get.mockClear()
+  window.dispatchEvent(new Event('parking-reservation-changed'));await flushPromises()
+  expect(vm.draft).toBe(before);expect(request.get).not.toHaveBeenCalled()
 })
