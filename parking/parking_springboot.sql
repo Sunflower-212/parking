@@ -148,6 +148,7 @@ create table recharges(
 
 -- 历史会话表
 create table historicalSession(
+    title varchar(128) NULL,
     id bigint unsigned primary key auto_increment comment '主键ID',
     chatId varchar(255) not null unique comment '聊天ID',
     type varchar(255) not null comment '类型',

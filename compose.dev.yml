@@ -117,6 +117,7 @@ services:
       AI_AUTOCONFIG_EXCLUDE: ${AI_AUTOCONFIG_EXCLUDE:-org.springframework.ai.autoconfigure.openai.OpenAiAutoConfiguration}
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
+      DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-flash}
       OCR_ENABLED: ${OCR_ENABLED:-false}
       BAIDU_API_KEY: ${BAIDU_API_KEY:-}
       BAIDU_SECRET_KEY: ${BAIDU_SECRET_KEY:-}

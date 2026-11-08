@@ -145,7 +145,7 @@ services:
       PARKING_QUEUE_NETTY_THREADS: '2'
       SPRING_RABBITMQ_LISTENER_SIMPLE_AUTO_STARTUP: 'true'
       BAIDU_APP_ID: ${BAIDU_APP_ID:-}
-      DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-chat}
+      DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-flash}
     volumes:
     - backend-logs:/app/logs
     - export-data:/app/exports

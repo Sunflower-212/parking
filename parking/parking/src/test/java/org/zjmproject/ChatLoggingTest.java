@@ -24,7 +24,9 @@ class ChatLoggingTest {
         when(client.prompt()).thenReturn(prompt);when(prompt.stream()).thenReturn(stream);
         var db=mock(JdbcTemplate.class);
         when(db.queryForObject(anyString(),eq(Integer.class),any(Object[].class))).thenReturn(1);
-        var controller=new ChatController(client,db,mock(UserService.class),mock(ParkingService.class),mock(SpacesService.class),mock(ParkingFlowService.class));
+        var tools=mock(org.zjmproject.ai.AiTools.class);
+        when(tools.callbacks(any(),any())).thenReturn(new org.springframework.ai.model.function.FunctionCallback[0]);
+        var controller=new ChatController(client,db,new org.zjmproject.ai.AiSessions(java.time.Clock.systemUTC()),tools,"test-only");
         var logger=(Logger)LoggerFactory.getLogger(ChatController.class);
         var output=new ListAppender<ILoggingEvent>() {
             @Override protected void append(ILoggingEvent event){event.prepareForDeferredProcessing();super.append(event);}
@@ -32,10 +34,10 @@ class ChatLoggingTest {
         output.start();logger.addAppender(output);
         ThreadLocalUtil.set(Map.of("id",7,"permissions",-1));
         try {
-            for(String expected:new String[]{"SUCCESS","CANCELLED","TIMEOUT"}) {
+            for(String expected:new String[]{"SUCCESS","CANCELLED","ERROR"}) {
                 Flux<String> source=switch(expected) {
                     case "SUCCESS" -> Flux.just("private AI response");
-                    case "TIMEOUT" -> Flux.error(new java.util.concurrent.TimeoutException("private provider error"));
+                    case "ERROR" -> Flux.error(new java.util.concurrent.TimeoutException("private provider error"));
                     default -> Flux.never();
                 };
                 when(stream.content()).thenReturn(source);

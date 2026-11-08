@@ -41,6 +41,7 @@ const routes = [
     redirect: '/user/spaceReservation',
     //子路由
     children: [
+      { path: '/user/ai', redirect: { path: '/user/spaceReservation', query: { ai: '1' } } },
       { path: '/user/spaceReservation', component: SpaceReservationVue },
       { path: '/user/enterHistory', component: EnterHistoryVue },
       { path: '/user/orderHistory', component: OrderHistoryVue },
@@ -63,6 +64,7 @@ const routes = [
     //子路由
     children: [
       { path: '/admin/entAndExitManagement', component: EntAndExitManagementVue },
+      { path: '/admin/ai', redirect: { path: '/admin/charts', query: { ai: '1' } } },
       { path: '/admin/parkManagement', component: ParkManagementVue },
       { path: '/admin/ruleManagement', component: RuleManagementVue },
       { path: '/admin/spaceManagement', component: SpaceManagementVue },

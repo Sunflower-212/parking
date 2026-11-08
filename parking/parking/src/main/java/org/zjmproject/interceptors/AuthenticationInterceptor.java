@@ -12,7 +12,7 @@ import java.util.Map;
 import java.util.Set;
 
 @Component
-public class AuthenticationInterceptor implements HandlerInterceptor {
+public class AuthenticationInterceptor implements org.springframework.web.servlet.AsyncHandlerInterceptor {
     private static final Set<String> PUBLIC = Set.of("/user/login", "/user/register", "/admin/login", "/user/rechargeNotify", "/actuator/health", "/error");
     private static final Set<String> USER_ADMIN = Set.of("/user/pageList", "/user/addUser", "/user/delete", "/user/resetPassword", "/user/data", "/user/export");
     private static final Set<String> ENTER_USER = Set.of("/enter/reservation", "/enter/cancelReservation", "/enter/userEnterOrReservation", "/enter/userPageList");
@@ -47,7 +47,7 @@ public class AuthenticationInterceptor implements HandlerInterceptor {
         int role = ((Number) claims.get("permissions")).intValue();
         req.setAttribute("log.actorId",((Number)claims.get("id")).intValue());
         req.setAttribute("log.actorRole",role);
-        boolean userOnly = (path.startsWith("/user/") && !USER_ADMIN.contains(path)) || ENTER_USER.contains(path) || Set.of("/orders/userList", "/orders/userPageList").contains(path) || Set.of("/recharges/userList", "/recharges/userPageList").contains(path) || path.startsWith("/ai/");
+        boolean userOnly = (path.startsWith("/user/") && !USER_ADMIN.contains(path)) || ENTER_USER.contains(path) || Set.of("/orders/userList", "/orders/userPageList").contains(path) || Set.of("/recharges/userList", "/recharges/userPageList").contains(path);
         boolean adminOnly = path.startsWith("/admin/") || USER_ADMIN.contains(path) || path.startsWith("/enter/") && !ENTER_USER.contains(path) || path.startsWith("/orders/") && !Set.of("/orders/userList", "/orders/userPageList").contains(path) || path.startsWith("/recharges/") && !Set.of("/recharges/userList", "/recharges/userPageList").contains(path) || path.startsWith("/dashboard/") || path.startsWith("/actuator/") || path.startsWith("/rule/") || path.startsWith("/parking/") && !Set.of("/parking/list", "/parking/catalog").contains(path) || path.startsWith("/spaces/") && !Set.of("/spaces/get", "/spaces/querySpaces", "/spaces/layout", "/spaces/availability").contains(path);
         if (userOnly && role != -1 || adminOnly && role == -1) return fail(res, 403, "权限不足");
         // 平台用户管理、导出、充值流水与监控统一由后端限制为超级管理员，不能只依赖前端隐藏菜单。
@@ -64,6 +64,11 @@ public class AuthenticationInterceptor implements HandlerInterceptor {
         res.setContentType("application/json;charset=UTF-8");
         res.getWriter().write("{\"code\":1,\"message\":\"" + message + "\",\"data\":null}");
         return false;
+    }
+
+    @Override
+    public void afterConcurrentHandlingStarted(HttpServletRequest req, HttpServletResponse res, Object handler) {
+        ThreadLocalUtil.remove();
     }
 
     @Override

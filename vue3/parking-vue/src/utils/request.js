@@ -11,6 +11,13 @@ export const baseURL = (
   import.meta.env.VITE_API_BASE_URL || `${import.meta.env.BASE_URL}api`
 ).replace(/\/$/, '')
 let unauthorizedShown = false
+export function clearUnauthorizedSession() {
+  if (router.currentRoute.value.path === '/user/paymentResult') rememberPaymentReturn(router.currentRoute.value.query)
+  useTokenStore().removeToken()
+  useUserInfoStore().removeInfo()
+  useAdminInfoStore().removeInfo()
+  if (router.currentRoute.value.path !== '/login') router.replace('/login')
+}
 const request = axios.create({ baseURL, timeout: 30000 })
 async function decodeBlob(data, contentType) {
   if (!(data instanceof Blob) || !/json/i.test(data.type || contentType || '')) return data
@@ -56,12 +63,7 @@ request.interceptors.response.use(
     error.message = safeMessage(httpErrorMessage(error))
     error.requestId = error.response?.headers?.['x-request-id']
     if (error?.response?.status === 401) {
-      if (router.currentRoute.value.path === '/user/paymentResult')
-        rememberPaymentReturn(router.currentRoute.value.query)
-      useTokenStore().removeToken()
-      useUserInfoStore().removeInfo()
-      useAdminInfoStore().removeInfo()
-      if (router.currentRoute.value.path !== '/login') router.replace('/login')
+      clearUnauthorizedSession()
     }
     // 取消请求不弹错误；只有 401 清会话，缓存或登录基础设施故障返回的 503 保留会话供重试。
     const unauthorized = error?.response?.status === 401

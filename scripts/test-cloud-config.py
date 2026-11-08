@@ -29,6 +29,14 @@ class CloudConfigTest(unittest.TestCase):
     def test_complete_format_passes_without_network_calls(self):
         self.assertEqual([], module.issues(self.config()))
 
+    def test_ai_endpoint_and_model_are_validated_without_echoing_values(self):
+        config = self.config()
+        config['services']['backend']['environment'].update(DEEPSEEK_BASE_URL='https://secret@example.invalid/?key=private', DEEPSEEK_MODEL='bad value')
+        errors = module.issues(config)
+        self.assertTrue(any(e.startswith('DEEPSEEK_BASE_URL:') for e in errors))
+        self.assertTrue(any(e.startswith('DEEPSEEK_MODEL:') for e in errors))
+        self.assertNotIn('private', '\n'.join(errors))
+
     def test_errors_do_not_include_submitted_credentials(self):
         config = self.config()
         env = config['services']['backend']['environment']

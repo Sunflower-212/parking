@@ -11,6 +11,7 @@ import useAdmin from '@/stores/adminInfo'
 import useUser from '@/stores/userInfo'
 import { roleName } from '@/utils/format'
 import StatusTag from '@/components/StatusTag.vue'
+import AiFloatingAssistant from '@/components/AiFloatingAssistant.vue'
 import defaultAvatar from '@/assets/default.png'
 const props = defineProps({ admin: Boolean })
 const route = useRoute(),
@@ -179,5 +180,6 @@ onMounted(load)
         ><router-view v-else />
       </main>
     </div>
+    <AiFloatingAssistant v-if="token.token && !loading && !failed" :key="token.token" :admin="admin" />
   </div>
 </template>

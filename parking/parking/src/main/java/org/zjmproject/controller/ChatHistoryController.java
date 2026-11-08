@@ -1,45 +1,21 @@
 package org.zjmproject.controller;
-
-import lombok.RequiredArgsConstructor;
-import org.springframework.ai.chat.memory.ChatMemory;
-import org.springframework.ai.chat.messages.Message;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
-import org.zjmproject.pojo.MessageV0;
-import org.zjmproject.repository.ChatHistoryRepository;
-
-import java.util.List;
-
-@RequiredArgsConstructor
-@RestController
-@RequestMapping("/ai/history")
-@org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(name = "parking.integrations.ai", havingValue = "true")
+import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.web.bind.annotation.*;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.zjmproject.ai.*;
+import java.util.*;
+@RestController @RequestMapping("/ai/history")
+@org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(name="parking.integrations.ai",havingValue="true")
 public class ChatHistoryController {
-    @Autowired
-    private org.springframework.jdbc.core.JdbcTemplate db;
-    @Autowired
-    private ChatHistoryRepository chatHistoryRepository;
-
-    @Autowired
-    private ChatMemory chatMemory;
-
-    @GetMapping("/{type}")
-    public List<String> getChatIds(@PathVariable("type") String type) {
-        return chatHistoryRepository.getChatIds(type);
+    private final JdbcTemplate db;private final AiSessions sessions;
+    public ChatHistoryController(JdbcTemplate db,AiSessions sessions){this.db=db;this.sessions=sessions;}
+    @GetMapping("/{type}") public List<String> list(@PathVariable String type) {
+        if(!type.equals("chat"))throw new IllegalArgumentException("会话类型无效");var a=AiActor.current();
+        return db.queryForList("select chatId from historicalSession where userId=? and type=? order by id desc limit 100",String.class,Integer.toString(a.id()),a.historyType());
     }
-
-    @GetMapping("/{type}/{chatId}")
-    public List<MessageV0> getChatHistory(@PathVariable("type") String type, @PathVariable("chatId") String chatId) {
-        int actorId = org.zjmproject.service.AccessGuard.userId();
-        if (db.queryForObject("select count(*) from historicalSession where chatId=? and userId=? and type=?", Integer.class, chatId, Integer.toString(actorId), type) != 1)
-            throw new IllegalArgumentException("无权访问此会话");
-        List<Message> messages = chatMemory.get(actorId + ":" + chatId, 1000);
-        if (messages == null) {
-            return List.of();
-        }
-        return messages.stream().map(MessageV0::new).toList();
+    @GetMapping("/{type}/{chatId}") public List<Map<String,String>> history(@PathVariable String type,@PathVariable String chatId,HttpServletResponse response) {
+        if(!type.equals("chat"))throw new IllegalArgumentException("会话类型无效");var a=AiActor.current();
+        if(db.queryForObject("select count(*) from historicalSession where chatId=? and type=? and userId=?",Integer.class,chatId,a.historyType(),Integer.toString(a.id()))!=1)throw new IllegalArgumentException("无权访问此会话");
+        String key=a.key()+":"+chatId;response.setHeader("X-AI-History-Expired",Boolean.toString(!sessions.present(key)));return sessions.visible(key);
     }
 }

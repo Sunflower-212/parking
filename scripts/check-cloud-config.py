@@ -39,6 +39,15 @@ def issues(config):
             failures.append(key + ': must be enabled')
     if env.get('AI_AUTOCONFIG_EXCLUDE'):
         failures.append('AI_AUTOCONFIG_EXCLUDE: must be empty when AI is enabled')
+    try:
+        ai_url = urlsplit(str(env.get('DEEPSEEK_BASE_URL', 'https://api.deepseek.com')))
+        ai_valid = ai_url.scheme == 'https' and bool(ai_url.hostname) and ai_url.path in ('', '/', '/v1', '/v1/') and not any((ai_url.username, ai_url.password, ai_url.query, ai_url.fragment))
+    except ValueError:
+        ai_valid = False
+    if not ai_valid:
+        failures.append('DEEPSEEK_BASE_URL: expected HTTPS API root or /v1 URL without credentials or query')
+    if not re.fullmatch(r'[a-zA-Z0-9_.-]{1,100}', str(env.get('DEEPSEEK_MODEL', 'deepseek-flash'))):
+        failures.append('DEEPSEEK_MODEL: missing or invalid model identifier')
     if not re.fullmatch(r'\d{16,32}', str(env.get('ALIPAY_APP_ID', ''))):
         failures.append('ALIPAY_APP_ID: invalid application ID format')
     for key, minimum in [('ALIPAY_PRIVATE_KEY', 1000), ('ALIPAY_PUBLIC_KEY', 250)]:
