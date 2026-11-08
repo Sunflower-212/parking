@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { CELL, fitView } from '../src/utils/map-geometry.js'
+import { CELL, fitView, zoomAt } from '../src/utils/map-geometry.js'
 const stamp = Date.now().toString().slice(-7),
   admin = 'ea' + stamp,
   user = 'eu' + stamp,
@@ -161,7 +161,8 @@ test.describe('high density canvas interaction', () => {
     await login(page, user, user)
     await page.getByRole('combobox', { name: '停车场', exact: true }).press('Enter')
     await page.getByRole('option', { name: park, exact: true }).click()
-    await expect(page.getByRole('cell', { name: 'A1', exact: true })).toBeVisible()
+    await expect(page.locator('.map-metrics strong').nth(2)).toHaveText('1')
+    await page.getByRole('button', { name: '适配全图', exact: true }).click()
     await page.getByRole('button', { name: '放大地图', exact: true }).click()
     await page.getByRole('button', { name: '放大地图', exact: true }).click()
     const canvas = page.locator('canvas')
@@ -170,10 +171,10 @@ test.describe('high density canvas interaction', () => {
     await page.mouse.down()
     await page.mouse.move(bounds.x + 220, bounds.y + 210, { steps: 5 })
     await page.mouse.up()
-    // List focus gives a known camera center regardless of viewport size and DPR.
-    await page.getByRole('button', { name: '选择', exact: true }).first().click()
-    const point = { x: bounds.width / 2, y: bounds.height / 2 }
-    await page.getByRole('button', { name: '清空选择', exact: true }).click()
+    const fitted = fitView([{ spaces_row: 1, spaces_col: 1 }], bounds.width, bounds.height)
+    const scale = fitted.scale * 1.25 ** 2
+    const offset = zoomAt({ x: bounds.width / 2, y: bounds.height / 2 }, fitted.offset, fitted.scale, scale)
+    const point = { x: offset.x + 20 + CELL * scale / 2, y: offset.y + 10 + CELL * scale / 2 }
     await canvas.click({ position: point })
     await expect(page.locator('.selection-actions strong')).toHaveText('1')
     await canvas.click({ position: point })
@@ -321,16 +322,21 @@ test('user reserves once, cancels, and sees responsive pages and current account
   await page.getByRole('combobox', { name: '停车场', exact: true }).press('Enter')
   await page.getByRole('option', { name: park, exact: true }).click()
   await expect(page.locator('.space-list')).toHaveCount(0)
-  await expect(page.locator('.map-metrics strong').nth(2)).toHaveText('1')
+  const layout = await data(await page.request.get('/api/spaces/layout', {
+    headers: tokenHeaders(rootToken), params: { park_id: parkId, spaces_storey: 1 },
+  }))
+  await expect(page.locator('.map-metrics strong').nth(2)).toHaveText(String(layout.length))
+  const space = layout.find((item) => item.spaces_row === 1 && item.spaces_col === 1)
+  expect(space).toBeTruthy()
   await page.getByRole('button', { name: '适配全图', exact: true }).click()
   const canvas = page.locator('canvas')
   const bounds = await canvas.boundingBox()
-  const view = fitView([{ spaces_row: 1, spaces_col: 1 }], bounds.width, bounds.height)
+  const view = fitView(layout, bounds.width, bounds.height)
   await canvas.click({ position: {
-    x: view.offset.x + CELL * view.scale / 2,
-    y: view.offset.y + CELL * view.scale / 2,
+    x: view.offset.x + (space.spaces_col - 0.5) * CELL * view.scale,
+    y: view.offset.y + (space.spaces_row - 0.5) * CELL * view.scale,
   } })
-  await expect(page.locator('.space-inspector h2')).toHaveText('A1')
+  await expect(page.locator('.space-inspector h2')).toHaveText(space.spaces_name)
   await page.getByRole('button', { name: '确认预约', exact: true }).click()
   await expect(page.getByText(/预约到期：/)).toBeVisible()
   await page.reload()
