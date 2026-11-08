@@ -45,7 +45,8 @@ class ParkingIntegrationTest {
     }
     @BeforeEach void fixture() {
         prefix="it"+UUID.randomUUID().toString().replace("-","").substring(0,8);
-        plate="京A-"+prefix.substring(2,7).toUpperCase();plate2="京B-"+prefix.substring(2,7).toUpperCase();
+        String suffix=String.format("%05d",Integer.toUnsignedLong(prefix.hashCode())%100000);
+        plate="京A-"+suffix;plate2="京B-"+suffix;
         user=insert("insert into user(user_name,password,plate_num,balance,create_time,update_time) values(?,?,?,20,now(),now())",prefix,Md5Util.getMD5String("test12345"),plate);
         user2=insert("insert into user(user_name,password,plate_num,balance,create_time,update_time) values(?,?,?,20,now(),now())",prefix+"b",Md5Util.encode("test12345"),plate2);
         int admin=db.queryForObject("select id from admin where permissions=1 limit 1",Integer.class);
@@ -78,6 +79,33 @@ class ParkingIntegrationTest {
         assertEquals(0,new BigDecimal("15.00").compareTo(db.queryForObject("select balance from user where id=?",BigDecimal.class,user)));
         assertThrows(IllegalArgumentException.class,()->flow.exit(plate,park));
         assertEquals(1,db.queryForObject("select count(*) from orders where user_id=?",Integer.class,user));
+    }
+    @Test void aiToolsDistinguishArrivalFromTheRetainedReservationAndNeverReleaseItsSpace() throws Exception {
+        var tools=new org.zjmproject.ai.AiTools(db,org.mockito.Mockito.mock(DashboardService.class),clock);
+        var actor=new org.zjmproject.ai.AiActor(user,-1);
+        var events=new ArrayList<Map<String,Object>>();
+        var callbacks=Arrays.stream(tools.callbacks(actor,events::add)).collect(java.util.stream.Collectors.toMap(f->f.getName(),f->f));
+        var json=new com.fasterxml.jackson.databind.ObjectMapper();
+        int id=flow.reserve(user,space).getId();
+        db.update("update enter set expires_at=? where id=?",LocalDateTime.now(clock).plusMinutes(30),id);
+        assertEquals("RESERVED",json.readTree(callbacks.get("myReservation").call("{}")).path("data").path("status").asText());
+        flow.enter(plate,park);
+        // Reproduce an old deadline still present on a vehicle that has already entered.
+        db.update("update enter set expires_at=? where id=?",LocalDateTime.now(clock).minusDays(4),id);
+        var before=db.queryForMap("select * from enter where id=?",id);
+        var spaceBefore=db.queryForMap("select * from spaces where id=?",space);
+        var balance=db.queryForObject("select balance from user where id=?",BigDecimal.class,user);
+        int capacity=available();
+        assertEquals(1,((Number)before.get("reservation")).intValue());
+        var result=json.readTree(callbacks.get("myReservation").call("{}")).path("data");
+        assertEquals("IN_PARK",result.path("status").asText());assertTrue(result.hasNonNull("enteredAt"));assertFalse(result.has("expiresAt"));
+        assertTrue(callbacks.get("prepareReservation").call("{\"spaceId\":"+space2+"}").contains("IN_PARK"));
+        assertTrue(callbacks.get("prepareCancellation").call("{\"reservationId\":"+id+"}").contains("IN_PARK"));
+        assertTrue(events.stream().noneMatch(e->"action".equals(e.get("type"))));
+        assertThrows(IllegalStateException.class,()->flow.cancel(user,id));
+        assertEquals(before,db.queryForMap("select * from enter where id=?",id));
+        assertEquals(spaceBefore,db.queryForMap("select * from spaces where id=?",space));
+        assertEquals(capacity,available());assertEquals(balance,db.queryForObject("select balance from user where id=?",BigDecimal.class,user));
     }
     @Test void oldExpiryCannotReleaseANewReservation() {
         int old=flow.reserve(user,space).getId();flow.cancel(user,old);
@@ -348,6 +376,20 @@ class ParkingIntegrationTest {
         var params=Map.of("app_id","integration-app","trade_status","TRADE_SUCCESS","out_trade_no",Integer.toString(id),"total_amount","12.34","trade_no",prefix,"gmt_payment",LocalDateTime.now(clock).withNano(0).format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
         var pool=Executors.newFixedThreadPool(2);try{var a=pool.submit(()->payments.confirm(params));var b=pool.submit(()->payments.confirm(params));a.get(5,TimeUnit.SECONDS);b.get(5,TimeUnit.SECONDS);}finally{pool.shutdownNow();}
         assertEquals(0,new BigDecimal("32.34").compareTo(db.queryForObject("select balance from user where id=?",BigDecimal.class,user)));
+    }
+    @Test void supportedPlatesSaveAndReserveWithTheSameValidation() {
+        var headers=new HttpHeaders();headers.set("Authorization",token(user,prefix,-1));headers.setContentType(MediaType.APPLICATION_JSON);
+        for(String value:List.of("皖H-8A8B8","沪A-GA1234","粤B-12345H")) {
+            var body=Map.of("id",user,"name","测试","plate_num",value,"car_color","白色","tel_num","13912345678");
+            assertEquals(0,http.exchange("/user/update",HttpMethod.PUT,new HttpEntity<>(body,headers),Map.class).getBody().get("code"));
+            assertEquals(value,db.queryForObject("select plate_num from user where id=?",String.class,user));
+            var reservation=flow.reserve(user,space);assertEquals(1,available());flow.cancel(user,reservation.getId());assertEquals(2,available());
+        }
+        var invalid=Map.of("id",user,"name","测试","plate_num","皖H-ABC12","car_color","白色","tel_num","13912345678");
+        assertNotEquals(0,http.exchange("/user/update",HttpMethod.PUT,new HttpEntity<>(invalid,headers),Map.class).getBody().get("code"));
+        assertEquals("粤B-12345H",db.queryForObject("select plate_num from user where id=?",String.class,user));
+        db.update("update user set plate_num='皖H-ABC12' where id=?",user);
+        assertThrows(IllegalArgumentException.class,()->flow.reserve(user,space));assertEquals(2,available());
     }
     @Test void profileUpdatesUseTheAuthenticatedUserAndIgnoreBalance() {
         String auth=token(user,prefix,-1);var h=new HttpHeaders();h.set("Authorization",auth);h.setContentType(MediaType.APPLICATION_JSON);

@@ -12,7 +12,7 @@ import java.time.LocalDateTime;
 
 @Data
 public class User {
-    public static final String LICENSE_PLATE_REGEX = "([京津沪渝冀晋辽吉黑苏浙皖闽赣鲁豫鄂湘粤桂琼川贵云藏陕甘青宁新港澳台])[A-Z]{1}-[A-Z0-9]{5,6}";
+    public static final String LICENSE_PLATE_REGEX = org.zjmproject.utils.LicensePlate.REGEX;
     @NotNull
     private Integer id;//主键ID
     private String user_name;//用户名

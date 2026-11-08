@@ -289,6 +289,7 @@ onBeforeUnmount(() => {
             :label="field.label"
             :prop="field.key"
             :rules="[
+              ...(field.rules || []),
               {
                 required:
                   field.required || field.type === 'number' || !!field.source || !!field.options,

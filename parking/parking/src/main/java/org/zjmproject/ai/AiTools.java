@@ -31,10 +31,10 @@ public class AiTools {
             new Spec("parkingRules","查询指定停车场的实际收费规则",Map.of("parkingId",integer(true,Integer.MAX_VALUE)))));
         if(a.role()==-1) list.addAll(List.of(
             new Spec("myAccount","查询本人可用余额、预留余额和会员期限",Map.of()),
-            new Spec("myReservation","查询本人当前预约或在场状态",Map.of()),
+            new Spec("myReservation","查询本人最新停车状态；必须以status和message为准，IN_PARK表示已入场，不能再次预约或取消预约",Map.of()),
             new Spec("myOrders","查询本人最近停车订单；默认最近7天，时间格式yyyy-MM-ddTHH:mm:ss，范围最多31天",Map.of("from",string(false,19),"to",string(false,19),"page",integer(false,10000))),
-            new Spec("prepareReservation","仅生成预约确认卡片，未预约成功；必须由用户点击确认",Map.of("spaceId",integer(true,Integer.MAX_VALUE))),
-            new Spec("prepareCancellation","仅生成本人预约取消确认卡片，未取消；必须由用户点击确认",Map.of("reservationId",integer(true,Integer.MAX_VALUE)))));
+            new Spec("prepareReservation","检查本人最新停车状态后生成预约确认卡片；已入场不能预约，卡片必须由用户确认",Map.of("spaceId",integer(true,Integer.MAX_VALUE))),
+            new Spec("prepareCancellation","检查本人最新停车状态后生成取消卡片；已入场不能取消，卡片必须由用户确认",Map.of("reservationId",integer(true,Integer.MAX_VALUE)))));
         else list.add(new Spec("managementSummary","查询权限范围内的经营统计，默认最近7天，最多31天",Map.of("parkingId",integer(false,Integer.MAX_VALUE),"days",integer(false,31))));
         return list;
     }
@@ -83,7 +83,48 @@ public class AiTools {
         var rows=db.queryForList("select p.id,p.park_name,p.park_address,p.park_storey from parking p where p.id=?"+scope(actor,args),args.toArray());
         if(rows.isEmpty())throw new Invalid("NOT_FOUND_OR_FORBIDDEN","parkingId","停车场不存在或无权访问");return rows.get(0);
     }
-    private List<Map<String,Object>> current(AiActor a){return db.queryForList("select e.id,e.park_id,e.space_id,e.flag,e.reservation,e.expires_at,p.park_name,s.spaces_name,s.spaces_storey from enter e join parking p on p.id=e.park_id join spaces s on s.id=e.space_id where e.active_user_id=?",a.id());}
+    private record CurrentParking(String status, String label, String message, boolean canReserve, boolean canCancel,
+                                  Map<String,Object> entry) {
+        Map<String,Object> view() {
+            var result=new LinkedHashMap<String,Object>();
+            result.put("status",status);result.put("statusLabel",label);result.put("message",message);
+            result.put("canReserve",canReserve);result.put("canCancel",canCancel);
+            if(entry!=null) {
+                result.put("recordId",entry.get("id"));result.put("parkingId",entry.get("park_id"));
+                result.put("parkingName",entry.get("park_name"));result.put("spaceId",entry.get("space_id"));
+                result.put("spaceName",entry.get("spaces_name"));result.put("floor",entry.get("spaces_storey"));
+                // Reservation deadlines remain historical after entry and must not describe current parking.
+                if(is(entry,"flag",1))result.put("enteredAt",time(entry.get("enter_time")));
+                else if(canCancel)result.put("expiresAt",time(entry.get("expires_at")));
+            }
+            return result;
+        }
+    }
+    private static boolean is(Map<String,Object> row,String field,int value) {
+        return row.get(field) instanceof Number n && n.intValue()==value;
+    }
+    private static LocalDateTime time(Object value) {
+        if(value instanceof java.sql.Timestamp timestamp)return timestamp.toLocalDateTime();
+        return value instanceof LocalDateTime date?date:null;
+    }
+    private CurrentParking current(AiActor a) {
+        var rows=db.queryForList("select e.id,e.park_id,e.space_id,e.flag,e.reservation,e.enter_time,e.expires_at,p.id linked_park_id,p.park_name,s.id linked_space_id,s.park_id space_park_id,s.active_enter_id,s.spaces_flag,s.spaces_name,s.spaces_storey from enter e left join parking p on p.id=e.park_id left join spaces s on s.id=e.space_id where e.active_user_id=?",a.id());
+        if(rows.isEmpty())return new CurrentParking("NONE","无活动记录","当前没有预约或在场记录，可以选择车位预约",true,false,null);
+        var entry=rows.get(0);
+        boolean inPark=is(entry,"flag",1);
+        boolean linked=entry.get("park_id") instanceof Number park && entry.get("id") instanceof Number id
+            && is(entry,"linked_park_id",park.intValue()) && is(entry,"space_park_id",park.intValue())
+            && entry.get("space_id") instanceof Number space && is(entry,"linked_space_id",space.intValue())
+            && is(entry,"active_enter_id",id.intValue()) && is(entry,"spaces_flag",1)
+            && entry.get("spaces_storey") instanceof Number floor && floor.intValue()>0
+            && entry.get("park_name")!=null && entry.get("spaces_name")!=null;
+        var expiry=time(entry.get("expires_at"));
+        if(rows.size()!=1 || !linked || (inPark?time(entry.get("enter_time"))==null:!is(entry,"flag",0)||!is(entry,"reservation",1)||expiry==null))
+            return new CurrentParking("UNKNOWN","状态待核对",inPark?"车辆已入场，但记录信息不完整，不能再次预约或取消预约，请联系管理员核对":"当前停车记录信息不完整，暂不能预约或取消，请联系管理员核对",false,false,entry);
+        if(inPark)return new CurrentParking("IN_PARK","已入场","车辆已入场，不能再次预约或取消预约",false,false,entry);
+        if(!LocalDateTime.now(clock).isBefore(expiry))return new CurrentParking("EXPIRED_PENDING_RELEASE","预约到期待释放","预约已到期，待释放；可以取消原预约释放占用，暂不能再次预约",false,true,entry);
+        return new CurrentParking("RESERVED","已预约","已有有效预约，尚未入场；可以取消原预约，不能重复预约",false,true,entry);
+    }
     private Object execute(String name,ObjectNode n,AiActor a,Consumer<Map<String,Object>> events) {
         int page=number(n,"page",1),offset=(page-1)*20;
         switch(name){
@@ -109,7 +150,7 @@ public class AiTools {
                 var now=LocalDateTime.now(clock);
                 return db.queryForList("select balance-reserved_balance available_balance,reserved_balance,vip_start_time,vip_end_time,case when vip_start_time<=? and vip_end_time>? then 1 else 0 end membership_active from user where id=?",now,now,a.id());
             }
-            case "myReservation":return current(a);
+            case "myReservation":return current(a).view();
             case "myOrders": {
                 if(n.has("from")!=n.has("to"))throw new Invalid("INVALID_ARGUMENT","from/to","开始和结束时间需一起提供");
                 LocalDateTime to=LocalDateTime.now(clock),from=to.minusDays(7);
@@ -123,19 +164,20 @@ public class AiTools {
                 return dashboard.summary(a.id(),a.role(),parkId,number(n,"days",7));
             }
             case "prepareReservation": {
+                var current=current(a);
+                if(!current.canReserve())throw new Invalid(current.status(),"spaceId",current.message());
                 String plate=db.queryForObject("select plate_num from user where id=?",String.class,a.id());
                 if(plate==null || !plate.matches(org.zjmproject.pojo.User.LICENSE_PLATE_REGEX))throw new Invalid("PROFILE_REQUIRED","spaceId","请先在个人资料中完善有效车牌信息");
-                if(!current(a).isEmpty())throw new Invalid("CONFLICT","spaceId","您已有预约或车辆在场");
                 var rows=db.queryForList("select s.id spaceId,p.id parkingId,p.park_name parkingName,s.spaces_name spaceName,s.spaces_storey floor from spaces s join parking p on p.id=s.park_id where s.id=? and s.spaces_flag=0 and s.active_enter_id is null",n.get("spaceId").intValue());
                 if(rows.isEmpty())throw new Invalid("CONFLICT","spaceId","车位不存在或已不可预约");
                 var card=new LinkedHashMap<String,Object>(rows.get(0));card.put("action","reserve");card.put("status","AWAITING_CONFIRMATION");
                 events.accept(Map.of("type","action","data",card));return card;
             }
             case "prepareCancellation": {
-                int id=n.get("reservationId").intValue();var rows=current(a);
-                var entry=rows.stream().filter(e->((Number)e.get("id")).intValue()==id && ((Number)e.get("flag")).intValue()==0 && ((Number)e.get("reservation")).intValue()==1).findFirst();
-                if(entry.isEmpty())throw new Invalid("NOT_FOUND_OR_FORBIDDEN","reservationId","没有可取消的本人预约");
-                var e=entry.get();var card=new LinkedHashMap<String,Object>();card.put("action","cancel");card.put("reservationId",id);card.put("parkingName",e.get("park_name"));card.put("spaceName",e.get("spaces_name"));card.put("floor",e.get("spaces_storey"));card.put("status","AWAITING_CONFIRMATION");events.accept(Map.of("type","action","data",card));return card;
+                int id=n.get("reservationId").intValue();var current=current(a);var e=current.entry();
+                if(e==null || !is(e,"id",id))throw new Invalid("NOT_FOUND_OR_FORBIDDEN","reservationId","没有可取消的本人预约");
+                if(!current.canCancel())throw new Invalid(current.status(),"reservationId",current.message());
+                var card=new LinkedHashMap<String,Object>();card.put("action","cancel");card.put("reservationId",id);card.put("parkingName",e.get("park_name"));card.put("spaceName",e.get("spaces_name"));card.put("floor",e.get("spaces_storey"));card.put("status","AWAITING_CONFIRMATION");events.accept(Map.of("type","action","data",card));return card;
             }
             default:throw new Invalid("UNKNOWN_TOOL","function","不支持此函数");
         }

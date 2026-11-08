@@ -22,7 +22,7 @@ public class PlateUploadService {
         try {
             file.transferTo(temp);
             if(javax.imageio.ImageIO.read(temp.toFile())==null) throw new IllegalArgumentException("文件不是有效图片");
-            String plate=ocr.getPlate(temp.toString());
+            String plate=org.zjmproject.utils.LicensePlate.normalize(ocr.getPlate(temp.toString()));
             if(plate==null || !plate.matches(User.LICENSE_PLATE_REGEX)) throw new IllegalArgumentException("未识别到有效车牌");
             return plate;
         } finally {Files.deleteIfExists(temp);}

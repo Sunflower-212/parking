@@ -1,0 +1,442 @@
+[
+  {
+    "plate": "京H-8A8B8",
+    "type": "ordinary"
+  },
+  {
+    "plate": "京A-GA1234",
+    "type": "small"
+  },
+  {
+    "plate": "京B-12345H",
+    "type": "large"
+  },
+  {
+    "plate": "津H-8A8B8",
+    "type": "ordinary"
+  },
+  {
+    "plate": "津A-GA1234",
+    "type": "small"
+  },
+  {
+    "plate": "津B-12345H",
+    "type": "large"
+  },
+  {
+    "plate": "沪H-8A8B8",
+    "type": "ordinary"
+  },
+  {
+    "plate": "沪A-GA1234",
+    "type": "small"
+  },
+  {
+    "plate": "沪B-12345H",
+    "type": "large"
+  },
+  {
+    "plate": "渝H-8A8B8",
+    "type": "ordinary"
+  },
+  {
+    "plate": "渝A-GA1234",
+    "type": "small"
+  },
+  {
+    "plate": "渝B-12345H",
+    "type": "large"
+  },
+  {
+    "plate": "冀H-8A8B8",
+    "type": "ordinary"
+  },
+  {
+    "plate": "冀A-GA1234",
+    "type": "small"
+  },
+  {
+    "plate": "冀B-12345H",
+    "type": "large"
+  },
+  {
+    "plate": "晋H-8A8B8",
+    "type": "ordinary"
+  },
+  {
+    "plate": "晋A-GA1234",
+    "type": "small"
+  },
+  {
+    "plate": "晋B-12345H",
+    "type": "large"
+  },
+  {
+    "plate": "蒙H-8A8B8",
+    "type": "ordinary"
+  },
+  {
+    "plate": "蒙A-GA1234",
+    "type": "small"
+  },
+  {
+    "plate": "蒙B-12345H",
+    "type": "large"
+  },
+  {
+    "plate": "辽H-8A8B8",
+    "type": "ordinary"
+  },
+  {
+    "plate": "辽A-GA1234",
+    "type": "small"
+  },
+  {
+    "plate": "辽B-12345H",
+    "type": "large"
+  },
+  {
+    "plate": "吉H-8A8B8",
+    "type": "ordinary"
+  },
+  {
+    "plate": "吉A-GA1234",
+    "type": "small"
+  },
+  {
+    "plate": "吉B-12345H",
+    "type": "large"
+  },
+  {
+    "plate": "黑H-8A8B8",
+    "type": "ordinary"
+  },
+  {
+    "plate": "黑A-GA1234",
+    "type": "small"
+  },
+  {
+    "plate": "黑B-12345H",
+    "type": "large"
+  },
+  {
+    "plate": "苏H-8A8B8",
+    "type": "ordinary"
+  },
+  {
+    "plate": "苏A-GA1234",
+    "type": "small"
+  },
+  {
+    "plate": "苏B-12345H",
+    "type": "large"
+  },
+  {
+    "plate": "浙H-8A8B8",
+    "type": "ordinary"
+  },
+  {
+    "plate": "浙A-GA1234",
+    "type": "small"
+  },
+  {
+    "plate": "浙B-12345H",
+    "type": "large"
+  },
+  {
+    "plate": "皖H-8A8B8",
+    "type": "ordinary"
+  },
+  {
+    "plate": "皖A-GA1234",
+    "type": "small"
+  },
+  {
+    "plate": "皖B-12345H",
+    "type": "large"
+  },
+  {
+    "plate": "闽H-8A8B8",
+    "type": "ordinary"
+  },
+  {
+    "plate": "闽A-GA1234",
+    "type": "small"
+  },
+  {
+    "plate": "闽B-12345H",
+    "type": "large"
+  },
+  {
+    "plate": "赣H-8A8B8",
+    "type": "ordinary"
+  },
+  {
+    "plate": "赣A-GA1234",
+    "type": "small"
+  },
+  {
+    "plate": "赣B-12345H",
+    "type": "large"
+  },
+  {
+    "plate": "鲁H-8A8B8",
+    "type": "ordinary"
+  },
+  {
+    "plate": "鲁A-GA1234",
+    "type": "small"
+  },
+  {
+    "plate": "鲁B-12345H",
+    "type": "large"
+  },
+  {
+    "plate": "豫H-8A8B8",
+    "type": "ordinary"
+  },
+  {
+    "plate": "豫A-GA1234",
+    "type": "small"
+  },
+  {
+    "plate": "豫B-12345H",
+    "type": "large"
+  },
+  {
+    "plate": "鄂H-8A8B8",
+    "type": "ordinary"
+  },
+  {
+    "plate": "鄂A-GA1234",
+    "type": "small"
+  },
+  {
+    "plate": "鄂B-12345H",
+    "type": "large"
+  },
+  {
+    "plate": "湘H-8A8B8",
+    "type": "ordinary"
+  },
+  {
+    "plate": "湘A-GA1234",
+    "type": "small"
+  },
+  {
+    "plate": "湘B-12345H",
+    "type": "large"
+  },
+  {
+    "plate": "粤H-8A8B8",
+    "type": "ordinary"
+  },
+  {
+    "plate": "粤A-GA1234",
+    "type": "small"
+  },
+  {
+    "plate": "粤B-12345H",
+    "type": "large"
+  },
+  {
+    "plate": "桂H-8A8B8",
+    "type": "ordinary"
+  },
+  {
+    "plate": "桂A-GA1234",
+    "type": "small"
+  },
+  {
+    "plate": "桂B-12345H",
+    "type": "large"
+  },
+  {
+    "plate": "琼H-8A8B8",
+    "type": "ordinary"
+  },
+  {
+    "plate": "琼A-GA1234",
+    "type": "small"
+  },
+  {
+    "plate": "琼B-12345H",
+    "type": "large"
+  },
+  {
+    "plate": "川H-8A8B8",
+    "type": "ordinary"
+  },
+  {
+    "plate": "川A-GA1234",
+    "type": "small"
+  },
+  {
+    "plate": "川B-12345H",
+    "type": "large"
+  },
+  {
+    "plate": "贵H-8A8B8",
+    "type": "ordinary"
+  },
+  {
+    "plate": "贵A-GA1234",
+    "type": "small"
+  },
+  {
+    "plate": "贵B-12345H",
+    "type": "large"
+  },
+  {
+    "plate": "云H-8A8B8",
+    "type": "ordinary"
+  },
+  {
+    "plate": "云A-GA1234",
+    "type": "small"
+  },
+  {
+    "plate": "云B-12345H",
+    "type": "large"
+  },
+  {
+    "plate": "藏H-8A8B8",
+    "type": "ordinary"
+  },
+  {
+    "plate": "藏A-GA1234",
+    "type": "small"
+  },
+  {
+    "plate": "藏B-12345H",
+    "type": "large"
+  },
+  {
+    "plate": "陕H-8A8B8",
+    "type": "ordinary"
+  },
+  {
+    "plate": "陕A-GA1234",
+    "type": "small"
+  },
+  {
+    "plate": "陕B-12345H",
+    "type": "large"
+  },
+  {
+    "plate": "甘H-8A8B8",
+    "type": "ordinary"
+  },
+  {
+    "plate": "甘A-GA1234",
+    "type": "small"
+  },
+  {
+    "plate": "甘B-12345H",
+    "type": "large"
+  },
+  {
+    "plate": "青H-8A8B8",
+    "type": "ordinary"
+  },
+  {
+    "plate": "青A-GA1234",
+    "type": "small"
+  },
+  {
+    "plate": "青B-12345H",
+    "type": "large"
+  },
+  {
+    "plate": "宁H-8A8B8",
+    "type": "ordinary"
+  },
+  {
+    "plate": "宁A-GA1234",
+    "type": "small"
+  },
+  {
+    "plate": "宁B-12345H",
+    "type": "large"
+  },
+  {
+    "plate": "新H-8A8B8",
+    "type": "ordinary"
+  },
+  {
+    "plate": "新A-GA1234",
+    "type": "small"
+  },
+  {
+    "plate": "新B-12345H",
+    "type": "large"
+  },
+  {
+    "plate": "皖I-12345",
+    "type": null
+  },
+  {
+    "plate": "皖O-12345",
+    "type": null
+  },
+  {
+    "plate": "皖H-12I34",
+    "type": null
+  },
+  {
+    "plate": "皖H-12O34",
+    "type": null
+  },
+  {
+    "plate": "皖H-ABC12",
+    "type": null
+  },
+  {
+    "plate": "皖H-1234",
+    "type": null
+  },
+  {
+    "plate": "皖H-123456",
+    "type": null
+  },
+  {
+    "plate": "皖H-1A1234",
+    "type": null
+  },
+  {
+    "plate": "皖H-A1234A",
+    "type": null
+  },
+  {
+    "plate": "皖H-1234AA",
+    "type": null
+  },
+  {
+    "plate": "皖H-12345警",
+    "type": null
+  },
+  {
+    "plate": "台A-12345",
+    "type": null
+  },
+  {
+    "plate": "皖h-88888",
+    "type": null
+  },
+  {
+    "plate": "皖H88888",
+    "type": null
+  },
+  {
+    "plate": "皖H-88888x",
+    "type": null
+  },
+  {
+    "plate": "皖H-88888\n",
+    "type": null
+  },
+  {
+    "plate": "",
+    "type": null
+  }
+]

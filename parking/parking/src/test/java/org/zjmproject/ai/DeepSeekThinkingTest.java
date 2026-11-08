@@ -56,4 +56,34 @@ class DeepSeekThinkingTest {
             assertFalse(sessions.visible("-1:7:c").toString().contains("thought"));
         } finally {server.stop(0);}
     }
+    @Test void nextTurnQueriesFreshEntryStateInsteadOfRepeatingOldReservation()throws Exception {
+        var fixture=new AiToolsTest();var row=fixture.entry(0,1);fixture.state(row);
+        var requests=new CopyOnWriteArrayList<JsonNode>();var server=HttpServer.create(new InetSocketAddress("127.0.0.1",0),0);
+        server.createContext("/v1/chat/completions",exchange->{try {
+            var body=json.readTree(exchange.getRequestBody());requests.add(body);
+            String reply;
+            if(requests.size()%2==1)reply=chunk(Map.of("tool_calls",List.of(Map.of("index",0,"id","current-"+requests.size(),"function",Map.of("name","myReservation","arguments","{}")))),"tool_calls");
+            else {
+                var messages=body.path("messages");var tool=json.readTree(messages.get(messages.size()-1).path("content").asText());
+                reply=chunk(Map.of("content",tool.path("data").path("message").asText()),"stop");
+            }
+            exchange.getResponseHeaders().set("Content-Type","text/event-stream");exchange.sendResponseHeaders(200,0);
+            exchange.getResponseBody().write(reply.getBytes(StandardCharsets.UTF_8));exchange.close();
+        }catch(Exception e){exchange.close();}});server.start();
+        try {
+            var sessions=new AiSessions(fixture.clock);var model=new DeepSeekThinkingChatModel(json,"http://127.0.0.1:"+server.getAddress().getPort(),"fake","deepseek-flash",sessions);
+            var client=ChatClient.builder(model).build();
+            for(int turn=0;turn<2;turn++) {
+                if(turn==1){row.put("flag",1);row.put("expires_at",java.sql.Timestamp.valueOf(LocalDateTime.now(fixture.clock).minusDays(4)));}
+                var run=new DeepSeekThinkingChatModel.Run("-1:7:state",sessions.messages("-1:7:state"),e->{});
+                var parts=client.prompt().user(turn==0?"我的预约":"取消预约").toolContext(Map.of(DeepSeekThinkingChatModel.RUN,run)).functions(fixture.tools.callbacks(new AiActor(7,-1),e->{})).stream().content().collectList().block(Duration.ofSeconds(10));
+                assertTrue(String.join("",parts).contains(turn==0?"已有有效预约":"车辆已入场，不能再次预约或取消预约"));
+            }
+            assertEquals(4,requests.size());
+            assertTrue(requests.get(2).toString().contains("已有有效预约"));
+            var messages=requests.get(3).path("messages");var current=json.readTree(messages.get(messages.size()-1).path("content").asText()).path("data");
+            assertEquals("IN_PARK",current.path("status").asText());assertFalse(current.has("expiresAt"));
+            assertTrue(requests.get(0).path("messages").get(0).path("content").asText().contains("myReservation查询最新状态"));
+        } finally {server.stop(0);}
+    }
 }

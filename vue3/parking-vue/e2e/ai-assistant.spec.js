@@ -72,7 +72,7 @@ async function setup(page, role = -1, mode = 'normal') {
   await page.getByRole('button',{name:'打开系统助手-可乐',exact:true}).click()
   await expect(page.getByRole('dialog',{name:'系统助手-可乐'})).toBeVisible()
   await expect(page.getByRole('textbox',{name:'输入问题'})).toBeVisible()
-  return { get deletes(){return deletes},get writes(){return writes},get chats(){return chats},finish:()=>release?.(),errors,unexpected }
+  return { enter:()=>{current=[{id:11,space_id:9,park_id:1,park_name:'隔离停车场',flag:1,reservation:1,enter_time:'2026-11-09T02:00:00',expires_at:'2026-11-05T02:30:00'}]},get deletes(){return deletes},get writes(){return writes},get chats(){return chats},finish:()=>release?.(),errors,unexpected }
 }
 async function send(page,text='请帮我查询空闲车位') {
   await page.getByRole('textbox',{name:'输入问题'}).fill(text)
@@ -307,4 +307,24 @@ test('failed history deletion keeps the row and conversation',async({page})=>{
   await expect(page.locator('.ai-message.user')).toBeVisible()
   await expect(page.getByText('删除失败，请重试',{exact:true})).toBeVisible()
   expect(state.deletes).toBe(1)
+})
+
+for (const action of ['reserve','cancel']) test(`old ${action} card detects entry and refreshes the map without a write`, async ({page}) => {
+  const fixture=await setup(page)
+  await page.goto(`${base}user/spaceReservation`)
+  await page.getByRole('button',{name:'打开系统助手-可乐',exact:true}).click()
+  await send(page)
+  if(action==='cancel') {
+    await page.locator('.ai-action').getByRole('button',{name:'确认预约',exact:true}).click()
+    await expect(page.locator('.ai-action').first()).toContainText('预约成功')
+    await send(page,'取消预约')
+  }
+  const writes=fixture.writes
+  fixture.enter()
+  await page.locator('.ai-action').getByRole('button',{name:action==='reserve'?'确认预约':'确认取消',exact:true}).click()
+  await expect(page.locator('.ai-action').last()).toContainText('车辆已入场，不能再次预约或取消预约')
+  await expect(page.locator('.ai-action').last().getByRole('button')).toHaveCount(0)
+  await expect(page.locator('.active-booking')).toContainText('在场')
+  expect(fixture.writes).toBe(writes)
+  expect(fixture.errors).toEqual([]);expect(fixture.unexpected).toEqual([])
 })

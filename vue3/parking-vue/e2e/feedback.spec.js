@@ -30,7 +30,7 @@ test.beforeAll(async ({ request }) => {
     data: {
       user_name: user,
       name: '反馈测试',
-      plate_num: '京F-' + Date.now().toString().slice(-6),
+      plate_num: '京F-' + Date.now().toString().slice(-5),
       car_color: '白色',
     },
   })

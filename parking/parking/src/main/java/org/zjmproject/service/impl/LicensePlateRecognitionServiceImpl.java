@@ -37,8 +37,7 @@ public class LicensePlateRecognitionServiceImpl implements LicensePlateRecogniti
         }
         JSONObject words=response.optJSONObject("words_result");
         String plate=words==null?"":words.optString("number","").toUpperCase();
-        if(plate.length()==7 || plate.length()==8) return plate.substring(0,2)+"-"+plate.substring(2);
-        return null;
+        return org.zjmproject.utils.LicensePlate.normalize(plate);
     }
     private JSONObject call(Request request) throws IOException {
         try(Response response=HTTP.newCall(request).execute()) {

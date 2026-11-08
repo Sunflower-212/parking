@@ -35,7 +35,7 @@ test.beforeAll(async ({ request }) => {
       data: {
         user_name: user,
         name: '测试用户',
-        plate_num: '京A-' + stamp.slice(-6),
+        plate_num: '京A-' + stamp.slice(-5),
         car_color: '白色',
         tel_num: '138' + stamp.padStart(8, '0'),
       },

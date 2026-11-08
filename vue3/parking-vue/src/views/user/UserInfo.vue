@@ -4,6 +4,9 @@ import { feedback as ElMessage, localFailure } from '@/utils/request-error-notic
 import request from '@/utils/request'
 import useUser from '@/stores/userInfo'
 import PageShell from '@/components/PageShell.vue'
+import LicensePlateInput from '@/components/LicensePlateInput.vue'
+import { validPlate } from '@/utils/license-plate'
+const plateInput = ref()
 const store = useUser(),
   model = ref({ ...store.info }),
   form = ref(),
@@ -14,11 +17,9 @@ const rules = {
     { min: 1, max: 10, message: '姓名最多10位' },
   ],
   plate_num: [
-    { required: true, message: '请输入车牌' },
     {
-      pattern:
-        /^[京津沪渝冀晋辽吉黑苏浙皖闽赣鲁豫鄂湘粤桂琼川贵云藏陕甘青宁新港澳台][A-Z]-[A-Z0-9]{5,6}$/,
-      message: '例如 京A-12345',
+      validator: (_, value, done) =>
+        validPlate(value) ? done() : done(new Error('请选择完整且符合类型的车牌号')),
     },
   ],
   car_color: [
@@ -31,7 +32,9 @@ const rules = {
   ],
 }
 async function save() {
-  if (busy.value || !(await form.value.validate().catch(() => false))) return
+  if (busy.value) return
+  const plateValid = plateInput.value.validate()
+  if (!(await form.value.validate().catch(() => false)) || !plateValid) return
   busy.value = true
   try {
     await request.put('/user/update', model.value)
@@ -63,11 +66,12 @@ async function save() {
             ><el-input :model-value="model.user_name" disabled /></el-form-item
           ><el-form-item label="姓名" prop="name"
             ><el-input v-model="model.name" maxlength="10" /></el-form-item
-          ><el-form-item label="车牌号" prop="plate_num"
-            ><el-input
+          ><el-form-item prop="plate_num" style="grid-column: 1 / -1">
+            <LicensePlateInput
+              ref="plateInput"
               v-model="model.plate_num"
-              placeholder="京A-12345"
-              maxlength="10" /></el-form-item
+              @update:model-value="form?.clearValidate('plate_num')"
+              :disabled="busy" /></el-form-item
           ><el-form-item label="车辆颜色" prop="car_color"
             ><el-input v-model="model.car_color" placeholder="白色" maxlength="6" /></el-form-item
           ><el-form-item label="手机号" prop="tel_num"

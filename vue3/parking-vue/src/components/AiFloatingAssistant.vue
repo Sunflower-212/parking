@@ -219,9 +219,17 @@ async function confirm(card) {
   if (actionBusy.value || card.finished || busy.value || admin.value) return
   card.busy = true
   actionBusy.value = true
+  const showEntered = (current) => {
+    if (!current.some((entry) => entry.flag === 1)) return false
+    card.finished = true
+    card.result = '车辆已入场，不能再次预约或取消预约'
+    window.dispatchEvent(new Event('parking-reservation-changed'))
+    return true
+  }
   try {
     const current = (await isEnterOrReservationService()).data || []
     if (stale()) return
+    if (showEntered(current)) return
     if (card.action === 'reserve') {
       if (
         !current.some((e) => e.space_id === card.spaceId && e.flag === 0 && e.reservation === 1)
@@ -242,6 +250,9 @@ async function confirm(card) {
       await cancelReservationService(card.reservationId)
     else throw new Error('预约状态已变化，请重新查询')
     if (stale()) return
+    const latest = (await isEnterOrReservationService()).data || []
+    if (stale()) return
+    if (showEntered(latest)) return
     card.finished = true
     card.result = card.action === 'reserve' ? '预约成功' : '已取消预约'
     feedback.success(card.result)
@@ -252,6 +263,7 @@ async function confirm(card) {
     try {
       const current = (await isEnterOrReservationService()).data || []
       if (stale()) return
+      if (showEntered(current)) return
       if (
         card.action === 'reserve'
           ? current.some((e) => e.space_id === card.spaceId && e.flag === 0 && e.reservation === 1)

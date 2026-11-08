@@ -5,12 +5,17 @@ import { createRouter, createMemoryHistory } from 'vue-router'
 import ElementPlus from 'element-plus'
 import AiFloatingAssistant from '../src/components/AiFloatingAssistant.vue'
 import { useTokenStore } from '../src/stores/token'
-const mock = vi.hoisted(() => ({ get: vi.fn(), chat: vi.fn(), history: vi.fn(), sessions: vi.fn(), delete: vi.fn() }))
+const mock = vi.hoisted(() => ({ get: vi.fn(), chat: vi.fn(), history: vi.fn(), sessions: vi.fn(), delete: vi.fn(), current: vi.fn(), reserve: vi.fn(), cancel: vi.fn(), success: vi.fn(), failure: vi.fn() }))
 vi.mock('../src/utils/request', () => ({ default: { get: mock.get } }))
 vi.mock('../src/api/ai', () => ({ aiChat: mock.chat, aiHistory: mock.history, aiSessions: mock.sessions, deleteAiSession: mock.delete }))
+vi.mock('../src/api/enter', () => ({ isEnterOrReservationService: mock.current, reservationService: mock.reserve, cancelReservationService: mock.cancel }))
+vi.mock('../src/utils/request-error-notice', () => ({ feedback: { success: mock.success }, localFailure: mock.failure }))
 let wrapper, router, pending, store
 beforeEach(async () => {
-  vi.clearAllMocks()
+  vi.resetAllMocks()
+  mock.current.mockResolvedValue({ data: [] })
+  mock.reserve.mockResolvedValue({ code: 0 })
+  mock.cancel.mockResolvedValue({ code: 0 })
   mock.get.mockResolvedValue({ data: { enabled: true, configured: true } })
   mock.history.mockResolvedValue({ items: [], expired: false })
   mock.sessions.mockResolvedValue({ data: [] })
@@ -169,4 +174,60 @@ it('a hidden failed answer creates an unread reminder and can be retried', async
   await open()
   expect(document.querySelector('.ai-messages').textContent).toContain('回答未完成')
   expect(document.querySelector('textarea').value).toBe('查询车位')
+})
+
+async function actionCard(action = 'cancel') {
+  await open(); await send()
+  pending.onEvent({ type: 'action', data: { action, reservationId: 11, spaceId: 3, parkingId: 2, floor: 1, parkingName: 'test', spaceName: 'A412' } })
+  pending.onEvent({ type: 'done', success: true }); pending.resolve(); await flushPromises()
+  return document.querySelector('.ai-action button')
+}
+const booked = { id: 11, space_id: 3, flag: 0, reservation: 1 }
+const entered = { ...booked, flag: 1 }
+it.each(['reserve', 'cancel'])('blocks an old %s card after entry and refreshes the map', async (action) => {
+  const changed = vi.fn(); window.addEventListener('parking-reservation-changed', changed)
+  try {
+    mock.current.mockResolvedValue({ data: [entered] })
+    const button = await actionCard(action); button.click(); await flushPromises()
+    expect(document.querySelector('.ai-action').textContent).toContain('车辆已入场，不能再次预约或取消预约')
+    expect(document.querySelector('.ai-action button')).toBeNull()
+    expect(mock.reserve).not.toHaveBeenCalled(); expect(mock.cancel).not.toHaveBeenCalled()
+    expect(mock.success).not.toHaveBeenCalled(); expect(changed).toHaveBeenCalledOnce()
+  } finally { window.removeEventListener('parking-reservation-changed', changed) }
+})
+it.each([false, true])('reconciles entry during a cancellation, response lost: %s', async (lost) => {
+  mock.current.mockResolvedValueOnce({ data: [booked] }).mockResolvedValue({ data: [entered] })
+  if (lost) mock.cancel.mockRejectedValue(new Error('response lost'))
+  const button = await actionCard(); button.click(); await flushPromises()
+  expect(mock.cancel).toHaveBeenCalledOnce()
+  expect(document.querySelector('.ai-action').textContent).toContain('车辆已入场')
+  expect(mock.success).not.toHaveBeenCalled()
+})
+it('does not claim cancellation success when a lost response leaves no active record', async () => {
+  mock.current.mockResolvedValueOnce({ data: [booked] }).mockResolvedValue({ data: [] })
+  mock.cancel.mockRejectedValue(new Error('response lost'))
+  const button = await actionCard(); button.click(); await flushPromises()
+  expect(document.querySelector('.ai-action').textContent).toContain('请查看预约状态')
+  expect(document.querySelector('.ai-action').textContent).not.toContain('取消成功')
+  expect(mock.success).not.toHaveBeenCalled()
+})
+it('normal cancellation only submits once and keeps confirmed feedback', async () => {
+  let complete
+  mock.current.mockResolvedValueOnce({ data: [booked] }).mockResolvedValue({ data: [] })
+  mock.cancel.mockImplementation(() => new Promise(resolve => { complete = resolve }))
+  const button = await actionCard(); button.click(); await flushPromises(); button.click(); await flushPromises()
+  expect(mock.cancel).toHaveBeenCalledOnce()
+  complete({ code: 0 }); await flushPromises()
+  expect(mock.success).toHaveBeenCalledWith('已取消预约')
+})
+it.each([false, true])('reservation reconciles a matching record, response lost: %s', async (lost) => {
+  mock.get.mockImplementation(url => Promise.resolve({ data: url === '/ai/status' ? { enabled: true, configured: true } : [{ id: 3, spaces_flag: 0 }] }))
+  mock.current.mockResolvedValueOnce({ data: [] }).mockResolvedValue({ data: [booked] })
+  if (lost) mock.reserve.mockRejectedValue(new Error('response lost'))
+  const button = await actionCard('reserve'); button.click(); await flushPromises()
+  expect(mock.reserve).toHaveBeenCalledWith({ id: 3 })
+  if (lost) {
+    expect(document.querySelector('.ai-action').textContent).toContain('已确认预约成功')
+    expect(mock.success).not.toHaveBeenCalled()
+  } else expect(mock.success).toHaveBeenCalledWith('预约成功')
 })

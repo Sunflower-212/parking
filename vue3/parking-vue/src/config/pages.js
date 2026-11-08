@@ -1,3 +1,4 @@
+import { validPlate } from '@/utils/license-plate'
 const text = (key, label, extra = {}) => ({ key, label, ...extra })
 const status = (key, label, kind) => ({ key, label, kind })
 const date = (key, label) => ({ key, label, date: true })
@@ -34,7 +35,15 @@ export const pages = {
     fields: [
       text('user_name', '用户名', { required: true, minlength: 3, maxlength: 16 }),
       text('name', '姓名', { maxlength: 10 }),
-      text('plate_num', '车牌号', { maxlength: 10 }),
+      text('plate_num', '车牌号', {
+        maxlength: 10,
+        rules: [
+          {
+            validator: (_, value, done) =>
+              !value || validPlate(value) ? done() : done(new Error('车牌格式无效，例如皖H-88888')),
+          },
+        ],
+      }),
       text('car_color', '车辆颜色', { maxlength: 6 }),
       text('tel_num', '手机号', { maxlength: 11 }),
     ],
