@@ -35,9 +35,10 @@ class PaymentRestartIntegrationTest {
     @Autowired org.redisson.api.RedissonClient redis;
     @Autowired Clock clock;
     @Autowired MembershipService membership;
+    @Autowired PaymentService payments;
     @org.springframework.test.context.bean.override.mockito.MockitoSpyBean PaymentQueue queue;
     @BeforeEach void isolate() {
-        assertTrue(Set.of("parking-payment-verification","parking-membership-verification").contains(System.getenv("PARKING_COMPOSE_PROJECT")));
+        assertTrue(Set.of("parking-payment-verification","parking-membership-verification","parking-ai-state-verification").contains(System.getenv("PARKING_COMPOSE_PROJECT")));
         if("CREATE".equals(System.getenv("PARKING_PAYMENT_RESTART_PHASE")))
             org.mockito.Mockito.doNothing().when(queue).scheduled(org.mockito.ArgumentMatchers.any());
     }
@@ -48,15 +49,17 @@ class PaymentRestartIntegrationTest {
         int user=db.queryForObject("select id from user where user_name=?",Integer.class,name);
         db.update("insert into recharges(user_id,amounts,pay_method,create_time,merchant_order_no,payment_state) values(?,10,0,?,?,'VERIFYING')",user,LocalDateTime.now(clock),"RST"+UUID.randomUUID().toString().replace("-",""));
         int id=db.queryForObject("select id from recharges where user_id=?",Integer.class,user);
+        db.update("update recharges set flag=2,cancel_requested=true where id=?",id);
         db.update("insert into payment_event(recharge_id,next_run_at,lease_token,lease_until) values(?,?,'interrupted',?)",id,LocalDateTime.now(clock).plusSeconds(5),LocalDateTime.now(clock).plusSeconds(5));
         redis.<String>getDeque(PaymentQueue.PROCESSING).add(id+":1");
         assertEquals("VERIFYING",db.queryForObject("select payment_state from recharges where id=?",String.class,id));
         db.update("insert into user(user_name,password,balance,create_time,update_time) values('membership-restart','test-only',100,now(),now())");
         int member=db.queryForObject("select id from user where user_name='membership-restart'",Integer.class);
         var order=membership.create(member,"MONTHLY",UUID.randomUUID().toString());
+        payments.cancel(member,order.rechargeId());
         db.update("update payment_event set next_run_at=?,lease_token='interrupted',lease_until=? where recharge_id=?",LocalDateTime.now(clock).plusSeconds(5),LocalDateTime.now(clock).plusSeconds(5),order.rechargeId());
         redis.<String>getDeque(PaymentQueue.PROCESSING).add(order.rechargeId()+":1");
-        assertEquals(new BigDecimal("100.00"),db.queryForObject("select reserved_balance from user where id=?",BigDecimal.class,member));
+        assertEquals(new BigDecimal("0.00"),db.queryForObject("select reserved_balance from user where id=?",BigDecimal.class,member));
     }
     @Test @EnabledIfEnvironmentVariable(named="PARKING_PAYMENT_RESTART_PHASE",matches="VERIFY")
     void aNewApplicationProcessRestoresAndCreditsExactlyOnce() throws Exception {
@@ -70,11 +73,11 @@ class PaymentRestartIntegrationTest {
             assertEquals(0,new BigDecimal("30").compareTo(db.queryForObject("select balance from user where id=?",BigDecimal.class,user)));
             assertNotNull(db.queryForObject("select completed_at from payment_event where recharge_id=?",Object.class,id));
             long memberDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(25);
-            while(System.nanoTime()<memberDeadline && !"SUCCEEDED".equals(db.queryForObject("select state from membership_order where user_id=?",String.class,member))) Thread.sleep(100);
-            assertEquals("SUCCEEDED",db.queryForObject("select state from membership_order where user_id=?",String.class,member));
-            assertEquals(new BigDecimal("0.00"),db.queryForObject("select balance from user where id=?",BigDecimal.class,member));
+            while(System.nanoTime()<memberDeadline && db.queryForObject("select count(*) from recharges where user_id=? and flag=1",Integer.class,member)==0) Thread.sleep(100);
+            assertEquals("CLOSED",db.queryForObject("select state from membership_order where user_id=?",String.class,member));
+            assertEquals(new BigDecimal("188.00"),db.queryForObject("select balance from user where id=?",BigDecimal.class,member));
             assertEquals(new BigDecimal("0.00"),db.queryForObject("select reserved_balance from user where id=?",BigDecimal.class,member));
-            assertEquals(2,db.queryForObject("select count(*) from recharges where user_id=?",Integer.class,member));
+            assertEquals(1,db.queryForObject("select count(*) from recharges where user_id=?",Integer.class,member));
         } finally {
             db.update("delete from recharges where user_id in (?,?)",user,member);
             db.update("delete from membership_order where user_id=?",member);

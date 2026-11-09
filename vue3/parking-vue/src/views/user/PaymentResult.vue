@@ -143,6 +143,7 @@ onBeforeUnmount(() => {
           <p v-if="id">
             充值单 {{ id }} <span v-if="status"> · {{ money(status.amounts) }}</span>
           </p>
+          <p v-if="status?.paymentState === 'CLOSED'">本地订单已关闭，此前付款核实后仍会入账。</p>
           <p v-if="error" role="alert">{{ error }}</p>
           <p v-else-if="id && status?.paymentState !== 'PAID' && status?.paymentState !== 'CLOSED'">
             以到账核验结果为准
@@ -157,6 +158,7 @@ onBeforeUnmount(() => {
           >
             {{ status?.paymentState === 'PAID' ? '刷新账户' : '重新核验' }}
           </el-button>
+          <el-button @click="router.replace('/user/rechargeHistory')">返回充值记录</el-button>
           <el-button @click="router.replace('/user/account')">返回账户</el-button>
         </template>
       </el-result>
@@ -170,5 +172,17 @@ onBeforeUnmount(() => {
 }
 .payment-result p {
   margin: 8px 0;
+}
+</style>
+
+<style scoped>
+:deep(.el-result__extra) {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+:deep(.el-result__extra .el-button) {
+  margin-left: 0;
 }
 </style>

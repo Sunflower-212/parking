@@ -23,5 +23,7 @@ public class Recharges {
     private String description;
     private String membership_order_id;
 
+    public String getDisplayState() { return org.zjmproject.utils.PaymentStates.display(flag,business_type,payment_state); }
+    public boolean getCanClose() { return org.zjmproject.utils.PaymentStates.canClose(flag,pay_method,business_type,payment_state); }
     private String user_name;
 }

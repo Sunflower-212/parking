@@ -77,7 +77,7 @@ public class MembershipService {
     }
 
     private Order read(String id, int userId) {
-        var rows = db.queryForList("select o.*,r.id recharge_id,r.payment_state from membership_order o " +
+        var rows = db.queryForList("select o.*,r.id recharge_id,r.payment_state,r.flag recharge_flag from membership_order o " +
                 "left join recharges r on r.membership_order_id=o.id and r.business_type='MEMBERSHIP_TOPUP' " +
                 "where o.id=? and o.user_id=?", id, userId);
         if (rows.isEmpty()) throw new IllegalArgumentException("会员订单不存在");
@@ -86,7 +86,7 @@ public class MembershipService {
                 ((Number) row.get("months")).intValue(), amount(row, "price"), amount(row, "reserved_amount"),
                 amount(row, "supplement_amount"), (String) row.get("state"),
                 row.get("recharge_id") == null ? null : ((Number) row.get("recharge_id")).intValue(),
-                (String) row.get("payment_state"), time(row.get("expires_at")), time(row.get("starts_at")),
+                row.get("recharge_flag")==null?null:org.zjmproject.utils.PaymentStates.display(((Number)row.get("recharge_flag")).intValue(),TOPUP,(String)row.get("payment_state")), time(row.get("expires_at")), time(row.get("starts_at")),
                 time(row.get("ends_at")), Boolean.TRUE.equals(row.get("renewed")) || Integer.valueOf(1).equals(row.get("renewed")));
     }
 

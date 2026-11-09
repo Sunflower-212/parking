@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { feedback as ElMessage, localFailure } from '@/utils/request-error-notice'
+import { confirmPaymentClose, closePayment } from '@/utils/payment-close'
 import DOMPurify from 'dompurify'
 import { useRouter, useRoute } from 'vue-router'
 import { rechargeId, paymentPath, rememberPayment } from '@/utils/payment-context'
@@ -249,16 +250,28 @@ async function recharge() {
     busy.value = false
   }
 }
-function pay() {
+async function pay() {
+  if (paying.value || busy.value) return
+  paying.value = true
   try {
     const form = formContainer.value?.querySelector('form')
     if (!form) throw new Error('missing form')
     const address = new URL(form.action)
     if (address.protocol !== 'https:' || !/(^|\.)alipay(dev)?\.com$/.test(address.hostname)) {
-      ElMessage.error('支付地址无效')
+      throw new Error('支付地址无效')
+    }
+    const status = (await request.get(`/user/recharge/${payment.value.rechargeId}/status`)).data
+    if (disposed) return
+    if (status.paymentState !== 'PENDING' || !status.canClose) {
+      paying.value = false
+      ElMessage.warning(
+        status.paymentState === 'CLOSED'
+          ? '充值单已关闭，不能继续支付'
+          : '订单状态已变化，请核验到账',
+      )
+      await refreshAccount()
       return
     }
-    if (paying.value) return
     rememberPayment(info.value.id, payment.value)
     form.target = '_self'
     paying.value = true
@@ -272,10 +285,18 @@ async function cancel(id = payment.value?.rechargeId) {
   if (busy.value) return
   busy.value = true
   try {
-    const result = await request.post(
-      '/user/cancelRecharges',
-      new URLSearchParams({ rechargesId: id }),
+    const order = pendingMembership.value
+    const isMembership = order?.rechargeId === id
+    if (
+      !(await confirmPaymentClose(
+        id,
+        isMembership ? order.supplementAmount : payment.value?.reAmounts,
+        isMembership,
+      )) ||
+      disposed
     )
+      return
+    const result = { data: await closePayment(id) }
     if (disposed) return
     dialog.value = false
     if (result.data?.paymentState === 'CLOSED' && result.data?.membershipOrder)
@@ -289,7 +310,8 @@ async function cancel(id = payment.value?.rechargeId) {
             : '充值单已关闭'
           : '已提交取消，正在核验支付状态',
     )
-  } catch {
+  } catch (error) {
+    if (!disposed) localFailure(error, '关单结果未确认，请刷新后重试')
   } finally {
     busy.value = false
     if (!disposed) await Promise.all([refresh(true, true), loadMembership(true)])
@@ -458,7 +480,7 @@ onBeforeUnmount(() => {
       <div ref="formContainer" v-html="paymentHtml" style="display: none" />
       <template #footer
         ><el-button @click="cancel()" :loading="busy">取消支付</el-button
-        ><el-button type="primary" :loading="paying" @click="pay"
+        ><el-button type="primary" :loading="paying" :disabled="busy" @click="pay"
           >前往支付宝沙箱</el-button
         ></template
       ></el-dialog

@@ -47,7 +47,8 @@ async function setup(page, { loggedIn = true, providerUnavailable = false } = {}
       data = {
         id: 7,
         amounts: 10,
-        paymentState: credited ? 'PAID' : 'VERIFYING',
+        paymentState: credited ? 'PAID' : !paid && creates ? 'PENDING' : 'VERIFYING',
+        canClose: !credited,
         canCheck: !credited,
       }
     } else if (path === 'recharges/userPageList')
@@ -157,19 +158,13 @@ test('a successful return parameter cannot show successful credit while verifica
   expect(fixture.errors).toEqual([])
 })
 
-test('a historical locally cancelled recharge can be verified from its own history row', async ({
-  page,
-}) => {
+test('a locally closed historical row hides reconciliation actions', async ({ page }) => {
   const fixture = await setup(page)
-  fixture.markPaid()
   await page.goto(`${base}user/rechargeHistory`)
-  await page.getByRole('button', { name: '核验到账', exact: true }).click()
-  await expect(page).toHaveURL(new RegExp(`${base}user/account$`))
-  await expect(
-    page.locator('.account-grid section').first().locator('strong').first(),
-  ).toContainText('30.00')
-  expect(fixture.checks).toBe(1)
-  expect(fixture.unexpected).toEqual([])
+  await expect(page.getByText('已关闭', { exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: '核验到账', exact: true })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '手动关单', exact: true })).toHaveCount(0)
+  expect(fixture.checks).toBe(0)
 })
 
 test('expired login resumes only the fixed owned-payment result route', async ({ page }) => {

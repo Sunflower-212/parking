@@ -19,7 +19,7 @@ import java.util.*;
 public class PaymentService {
     public record Scheduled(int id,long version) {}
     public record Status(int id, BigDecimal amounts, String paymentState, LocalDateTime expiresAt,
-                         boolean canCheck, String businessType, MembershipService.Order membershipOrder) {}
+                         boolean canCheck, boolean canClose, String businessType, MembershipService.Order membershipOrder) {}
     private record Work(int id,long version,String token,Map<String,Object> charge,int attempts) {}
     private final JdbcTemplate db;
     private final AliPayService alipay;
@@ -60,10 +60,10 @@ public class PaymentService {
     }
     public Status status(int userId,int id) {return status(owned(userId,id));}
     private Status status(Map<String,Object> row) {
-        String state=number(row.get("flag"))==1?"PAID":Objects.toString(row.get("payment_state"),"VERIFYING");
+        String state=org.zjmproject.utils.PaymentStates.display(number(row.get("flag")),(String)row.get("business_type"),(String)row.get("payment_state"));
         String type=Objects.toString(row.get("business_type"),"NORMAL_RECHARGE");
         var order=row.get("membership_order_id")==null?null:membership.paymentOrder((String)row.get("membership_order_id"),number(row.get("user_id")));
-        return new Status(number(row.get("id")),new BigDecimal(row.get("amounts").toString()),state,time(row.get("expires_at")),external(row) && !Set.of("PAID","CLOSED").contains(state),type,order);
+        return new Status(number(row.get("id")),new BigDecimal(row.get("amounts").toString()),state,time(row.get("expires_at")),external(row) && !Set.of("PAID","CLOSED","DEBIT").contains(state),external(row) && !Set.of("PAID","CLOSED","DEBIT").contains(state),type,order);
     }
     private boolean external(Map<String,Object> row) {
         return !MembershipService.DEBIT.equals(row.get("business_type")) && row.get("pay_method") instanceof Number method && method.intValue()==0;
@@ -94,21 +94,40 @@ public class PaymentService {
         return alipay.pay(id);
     }
     public Status cancel(int userId,int id) {
-        requireEnabled();
         if(!external(owned(userId,id))) throw new IllegalArgumentException("此记录不支持支付操作");
         tx.executeWithoutResult(s->{
             var row=lockCharge(id);
-            if(number(row.get("flag"))==1 || "CLOSED".equals(row.get("payment_state"))) return;
+            if(number(row.get("flag"))==1 || number(row.get("flag"))==2) return;
+            closeLocal(row);
+            if("CLOSED".equals(row.get("payment_state"))) return;
             ensureEvent(id);
-            db.update("update recharges set cancel_requested=true,payment_state='CLOSING' where id=?",id);
-            db.update("update payment_event set version=version+1,next_run_at=?,completed_at=null,lease_token=null,lease_until=null,request_id=? where recharge_id=?",now(),RuntimeEvents.requestId(),id);
+            var event=db.queryForMap("select * from payment_event where recharge_id=? for update",id);
+            var due=now();
+            if(event.get("last_checked_at")!=null && time(event.get("last_checked_at")).plusSeconds(10).isAfter(due)) due=time(event.get("last_checked_at")).plusSeconds(10);
+            if(event.get("lease_until")!=null && time(event.get("lease_until")).isAfter(due)) due=time(event.get("lease_until"));
+            // Keep the active lease: its worker may still return a valid payment, but cannot overwrite this intent.
+            db.update("update recharges set payment_state='CLOSING' where id=?",id);
+            db.update("update payment_event set version=version+1,next_run_at=?,completed_at=null,request_id=? where recharge_id=?",due,RuntimeEvents.requestId(),id);
             enqueue(id);
         });
-        return check(userId,id);
+        return status(userId,id);
+    }
+    private void closeLocal(Map<String,Object> row) {
+        if(number(row.get("flag"))==1) return;
+        db.update("update recharges set flag=2,cancel_requested=true where id=?",row.get("id"));
+        closeMembership(row);
+        RuntimeEvents.committed("payment.local-close","CLOSED",row.get("id"));
+    }
+    private boolean cancelRequested(Map<String,Object> row) {
+        return number(row.get("flag"))==2 || Boolean.TRUE.equals(row.get("cancel_requested")) || row.get("cancel_requested") instanceof Number n && n.intValue()!=0;
+    }
+    private LocalDateTime localDeadline(Map<String,Object> row) {
+        var expiry=time(row.get("expires_at"));
+        return expiry!=null?expiry:time(row.get("create_time")).plusMinutes(30);
     }
     public Status check(int userId,int id) {
         requireEnabled();var row=owned(userId,id);
-        if(!status(row).canCheck()) return status(row);
+        if(!external(row) || number(row.get("flag"))==1) return status(row);
         tx.executeWithoutResult(s->{
             ensureEvent(id);
             db.update("update payment_event set version=version+1,completed_at=null,next_run_at=? where recharge_id=? and completed_at is not null",now(),id);
@@ -169,6 +188,8 @@ public class PaymentService {
                 if("CLOSED".equals(row.get("membership_state")))
                     db.update("update recharges set description='会员充值补充（订单已关闭，转入余额）' where id=?",id);
             }
+            if(number(row.get("flag"))==2 && row.get("membership_order_id")==null)
+                db.update("update recharges set description='普通充值（关单后到账）' where id=?",id);
             complete(id);RuntimeEvents.committed("payment.confirm","SUCCESS",id);
         });
     }
@@ -185,7 +206,9 @@ public class PaymentService {
             if(rows.isEmpty()) return null;var event=rows.get(0);var at=now();
             long version=((Number)event.get("version")).longValue();
             if(event.get("completed_at")!=null || expected!=null && expected!=version) return null;
-            if(event.get("lease_until")!=null && time(event.get("lease_until")).isAfter(at)) return null;
+            if(event.get("lease_until")!=null && time(event.get("lease_until")).isAfter(at)) {
+                db.update("update payment_event set next_run_at=? where recharge_id=?",time(event.get("lease_until")),id);return null;
+            }
             if(event.get("last_checked_at")!=null && time(event.get("last_checked_at")).plusSeconds(10).isAfter(at)) {
                 db.update("update payment_event set next_run_at=? where recharge_id=?",time(event.get("last_checked_at")).plusSeconds(10),id);return null;
             }
@@ -205,15 +228,15 @@ public class PaymentService {
             if(trade==null || !no.equals(trade.orderNo())) throw new IllegalArgumentException("支付信息不匹配");
             if(trade.paid()) {credit(id,trade);return;}
             var expiry=time(row.get("expires_at"));
-            boolean cancel=Boolean.TRUE.equals(row.get("cancel_requested")) || row.get("cancel_requested") instanceof Number n && n.intValue()!=0;
-            boolean expired=expiry!=null && !now().isBefore(expiry);
+            boolean cancel=cancelRequested(row);
+            boolean expired=!now().isBefore(localDeadline(row));
             if("WAIT_BUYER_PAY".equals(trade.status()) && (cancel || expired)) {
                 if(alipay.close(no)) trade=new PaymentTrade(no,null,"TRADE_CLOSED",null,null);
                 else trade=alipay.query(no);
                 if(trade==null || !no.equals(trade.orderNo())) throw new IllegalArgumentException("支付信息不匹配");
                 if(trade.paid()) {credit(id,trade);return;}
             }
-            if("TRADE_CLOSED".equals(trade.status()) || "NOT_FOUND".equals(trade.status()) && expired) {
+            if("TRADE_CLOSED".equals(trade.status())) {
                 finish(work,"CLOSED",null,0,null);return;
             }
             if(!Set.of("WAIT_BUYER_PAY","NOT_FOUND").contains(trade.status())) throw new IllegalArgumentException("支付状态不明确");
@@ -221,25 +244,26 @@ public class PaymentService {
                 finish(work,"REVIEW",null,0,"LEGACY_UNCONFIRMED");return;
             }
             String state=cancel || expired?"CLOSING":expiry==null?"VERIFYING":"PENDING";
-            finish(work,state,next(row,now().plusSeconds(cancel || expired?15:60)),0,null);
+            finish(work,state,next(row,now().plusSeconds(cancel || expired?300:60)),0,"NOT_FOUND".equals(trade.status())?"PROVIDER_TRADE_NOT_FOUND":null);
         } catch(Exception e) {
             int errors=work.attempts()+1;
-            String reason=e instanceof IllegalArgumentException?"PAYMENT_MISMATCH":e instanceof org.springframework.dao.DataAccessException?"DATABASE_FAILURE":"PROVIDER_UNAVAILABLE";
+            var failure=PaymentProviderFailure.from(e);
+            String reason=e instanceof org.springframework.dao.DataAccessException?"DATABASE_FAILURE":e instanceof IllegalArgumentException?"PAYMENT_MISMATCH":failure.category();
             finish(work,errors>=5 || "PAYMENT_MISMATCH".equals(reason)?"REVIEW":"VERIFYING",
-                    next(row,now().plusSeconds(Math.min(300,5L<<Math.min(errors-1,6)))),errors,reason);
+                    next(row,now().plusSeconds(Math.min(300,5L<<Math.min(errors-1,6)))),errors,reason+("UNCLASSIFIED".equals(failure.providerCode())?"":":"+failure.providerCode()));
             org.slf4j.LoggerFactory.getLogger(PaymentService.class).atWarn().addKeyValue("event","payment.reconcile")
-                .addKeyValue("entityId",id).addKeyValue("result","RETRY").addKeyValue("reasonCode",reason).log("payment_unconfirmed");
+                .addKeyValue("entityId",id).addKeyValue("result","RETRY").addKeyValue("reasonCode",reason).addKeyValue("providerCode",failure.providerCode()).log("payment_unconfirmed");
         }
     }
     private LocalDateTime next(Map<String,Object> row,LocalDateTime proposed) {
-        var expiry=time(row.get("expires_at"));return expiry!=null && expiry.isAfter(now()) && expiry.isBefore(proposed)?expiry:proposed;
+        var expiry=localDeadline(row);return expiry.isAfter(now()) && expiry.isBefore(proposed)?expiry:proposed;
     }
     private void finish(Work work,String state,LocalDateTime due,int errors,String reason) {
         tx.executeWithoutResult(s->{
             var row=lockCharge(work.id());var event=db.queryForMap("select * from payment_event where recharge_id=? for update",work.id());
             if(number(row.get("flag"))==1 || !Objects.equals(event.get("lease_token"),work.token()) || ((Number)event.get("version")).longValue()!=work.version()) return;
             db.update("update recharges set payment_state=?,flag=case when ?='CLOSED' then 2 else flag end where id=?",state,state,work.id());
-            if("CLOSED".equals(state)) closeMembership(row);
+            if("CLOSED".equals(state) || cancelRequested(row) || !now().isBefore(localDeadline(row))) closeLocal(row);
             db.update("update payment_event set version=version+1,next_run_at=?,completed_at=?,attempts=?,last_error=?,lease_token=null,lease_until=null where recharge_id=?",due==null?now():due,due==null?now():null,errors,reason,work.id());
             if(due!=null) enqueue(work.id());
             RuntimeEvents.committed("payment.reconcile",state,work.id());
@@ -252,7 +276,12 @@ public class PaymentService {
         while(true) {
             var ids=db.queryForList("select id from recharges where id>? and flag<>1 and pay_method=0 and create_time>=? order by id limit 500",Integer.class,after,now().minusDays(15));
             if(ids.isEmpty()) return;
-            tx.executeWithoutResult(s->{for(int id:ids) ensureEvent(id);});after=ids.get(ids.size()-1);
+            for(int id:ids) tx.executeWithoutResult(s->{
+                var row=lockCharge(id);
+                if(number(row.get("flag"))==1) return;
+                if(cancelRequested(row)) closeLocal(row);
+                ensureEvent(id);
+            });after=ids.get(ids.size()-1);
         }
     }
 }

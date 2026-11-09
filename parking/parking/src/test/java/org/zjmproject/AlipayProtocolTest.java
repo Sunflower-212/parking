@@ -38,12 +38,12 @@ class AlipayProtocolTest {
         var service=new AliPayServiceImpl(){@Override protected AlipayClient client(){return client;}};
         var config=new AliPayConfig();config.setReturnUrl("https://example.invalid/parking/user/paymentResult");config.setNotifyUrl("https://example.invalid/parking/api/user/rechargeNotify");
         ReflectionTestUtils.setField(service,"config",config);ReflectionTestUtils.setField(service,"recharges",mapper);
-        var row=new Recharges();row.setId(7);row.setFlag(0);row.setPayment_state("PENDING");row.setAmounts(BigDecimal.TEN);row.setMerchant_order_no("PKunique");row.setExpires_at(LocalDateTime.of(2026,10,30,23,0));
+        var row=new Recharges();row.setId(7);row.setFlag(0);row.setPayment_state("PENDING");row.setAmounts(BigDecimal.TEN);row.setMerchant_order_no("PKunique");row.setExpires_at(LocalDateTime.of(2099,10,30,23,0));
         when(mapper.findRechargesById(7)).thenReturn(row);
         var response=new AlipayTradePagePayResponse();response.setBody("<form></form>");when(client.pageExecute(any(AlipayTradePagePayRequest.class))).thenReturn(response);
         service.pay(7);var captured=ArgumentCaptor.forClass(AlipayTradePagePayRequest.class);verify(client).pageExecute(captured.capture());
         var body=new org.json.JSONObject(captured.getValue().getBizContent());
-        assertEquals("PKunique",body.getString("out_trade_no"));assertEquals("2026-10-30 23:00:00",body.getString("time_expire"));
+        assertEquals("PKunique",body.getString("out_trade_no"));assertEquals("2099-10-30 23:00:00",body.getString("time_expire"));
         assertFalse(body.has("timeout_express"));assertEquals(config.getReturnUrl()+"?rechargeId=7",captured.getValue().getReturnUrl());
         assertEquals("余额充值",body.getString("subject"));
         clearInvocations(client);
@@ -63,13 +63,28 @@ class AlipayProtocolTest {
         assertFalse(service.close("7"));
         query.setSubCode("ACQ.SYSTEM_ERROR");assertThrows(com.alipay.api.AlipayApiException.class,()->service.query("7"));
     }
+    @Test void providerDiagnosticsNeverExposeUnapprovedCodesOrMessages() {
+        var auth=org.zjmproject.service.PaymentProviderFailure.response("40002","isv.invalid-signature");
+        assertEquals("PROVIDER_AUTH",auth.category());assertEquals("isv.invalid-signature",auth.providerCode());
+        var unknown=org.zjmproject.service.PaymentProviderFailure.response("secret", "token=private");
+        assertEquals("UNCLASSIFIED",unknown.providerCode());assertFalse(unknown.getMessage().contains("private"));
+        assertEquals("PROVIDER_TIMEOUT",org.zjmproject.service.PaymentProviderFailure.from(new com.alipay.api.AlipayApiException(new java.net.SocketTimeoutException("private"))).category());
+        assertEquals("PROVIDER_NETWORK",org.zjmproject.service.PaymentProviderFailure.from(new java.net.UnknownHostException("private")).category());
+    }
+    @Test void displayStateUsesLocalBusinessResultAndRestrictsCloseActions() {
+        var row=new Recharges();row.setFlag(2);row.setPay_method(0);row.setPayment_state("REVIEW");
+        assertEquals("CLOSED",row.getDisplayState());assertFalse(row.getCanClose());
+        row.setFlag(1);assertEquals("PAID",row.getDisplayState());assertFalse(row.getCanClose());
+        row.setBusiness_type("MEMBERSHIP_DEBIT");assertEquals("DEBIT",row.getDisplayState());
+        row.setBusiness_type("NORMAL_RECHARGE");row.setFlag(0);assertTrue(row.getCanClose());
+    }
     @Test void realSdkSignsAPageFormLocallyWithoutASandboxPayment() throws Exception {
         var generator=KeyPairGenerator.getInstance("RSA");generator.initialize(2048);var pair=generator.generateKeyPair();
         var config=new AliPayConfig();config.setAppId("1234567890123456");
         config.setAppPrivateKey(Base64.getEncoder().encodeToString(pair.getPrivate().getEncoded()));
         config.setAlipayPublicKey(Base64.getEncoder().encodeToString(pair.getPublic().getEncoded()));
         config.setNotifyUrl("https://example.invalid/parking/api/user/rechargeNotify");config.setReturnUrl("https://example.invalid/parking/user/paymentResult");
-        var mapper=mock(RechargesMapper.class);var row=new Recharges();row.setId(7);row.setFlag(0);row.setPayment_state("PENDING");row.setAmounts(BigDecimal.TEN);row.setMerchant_order_no("PKoffline");row.setExpires_at(LocalDateTime.of(2026,10,30,23,30));
+        var mapper=mock(RechargesMapper.class);var row=new Recharges();row.setId(7);row.setFlag(0);row.setPayment_state("PENDING");row.setAmounts(BigDecimal.TEN);row.setMerchant_order_no("PKoffline");row.setExpires_at(LocalDateTime.of(2099,10,30,23,30));
         when(mapper.findRechargesById(7)).thenReturn(row);
         var service=new AliPayServiceImpl();ReflectionTestUtils.setField(service,"config",config);ReflectionTestUtils.setField(service,"recharges",mapper);
         String form=service.pay(7).getForm();

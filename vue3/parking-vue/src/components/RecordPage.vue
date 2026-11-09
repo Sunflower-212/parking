@@ -1,5 +1,12 @@
 <script setup>
 import { useRouter } from 'vue-router'
+import {
+  paymentDisplayState,
+  canClosePayment,
+  confirmPaymentClose,
+  closePayment,
+} from '@/utils/payment-close'
+import useUser from '@/stores/userInfo'
 import { paymentPath } from '@/utils/payment-context'
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { jwtDecode } from 'jwt-decode'
@@ -16,6 +23,31 @@ import { useTokenStore } from '@/stores/token'
 import request from '@/utils/request'
 import { dateTime, money, cleanQuery } from '@/utils/format'
 const paymentRouter = useRouter()
+const account = useUser()
+const closing = ref(null)
+async function closeCharge(row) {
+  if (closing.value !== null) return
+  closing.value = row.id
+  try {
+    if (
+      !(await confirmPaymentClose(row.id, row.amounts, row.business_type === 'MEMBERSHIP_TOPUP')) ||
+      disposed
+    )
+      return
+    const status = await closePayment(row.id)
+    if (disposed) return
+    ElMessage.success(status.paymentState === 'PAID' ? '此订单已到账' : '充值单已关闭')
+    await load(false, { feedback: false })
+    if (status.membershipOrder) {
+      const result = await request.get('/user/userInfo')
+      if (!disposed) account.setInfo(result.data)
+    }
+  } catch (error) {
+    if (!disposed) localFailure(error, '关单结果未确认，请刷新后重试')
+  } finally {
+    closing.value = null
+  }
+}
 const props = defineProps({ page: { type: String, required: true } }),
   config = pages[props.page]
 const role = jwtDecode(useTokenStore().token).claims.permissions
@@ -208,13 +240,7 @@ onBeforeUnmount(() => {
         ><template #default="{ row }"
           ><StatusTag
             v-if="col.kind"
-            :value="
-              col.kind === 'payment'
-                ? row.business_type === 'MEMBERSHIP_DEBIT'
-                  ? 'DEBIT'
-                  : row.payment_state || row[col.key]
-                : row[col.key]
-            "
+            :value="col.kind === 'payment' ? paymentDisplayState(row) : row[col.key]"
             :kind="col.kind"
             :reservation="col.kind === 'entry' ? row.reservation : undefined"
           /><span v-else>{{
@@ -231,20 +257,27 @@ onBeforeUnmount(() => {
           ((config.update || config.remove || config.reset) && canEdit) || page === 'userRecharges'
         "
         label="操作"
-        :min-width="config.reset ? 170 : 130"
+        :min-width="config.reset || page === 'userRecharges' ? 180 : 130"
         fixed="right"
         ><template #default="{ row }">
           <el-button
             v-if="
               page === 'userRecharges' &&
-              row.business_type !== 'MEMBERSHIP_DEBIT' &&
-              row.flag !== 1 &&
-              row.payment_state !== 'CLOSED'
+              !['PAID', 'CLOSED', 'DEBIT'].includes(paymentDisplayState(row))
             "
             link
             type="primary"
             @click="paymentRouter.push(paymentPath(row.id))"
             >核验到账</el-button
+          >
+          <el-button
+            v-if="page === 'userRecharges' && canClosePayment(row)"
+            link
+            type="danger"
+            :disabled="closing !== null"
+            :loading="closing === row.id"
+            @click="closeCharge(row)"
+            >手动关单</el-button
           >
           <el-button
             v-if="config.update"

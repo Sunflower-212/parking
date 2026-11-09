@@ -45,6 +45,7 @@ async function fixture(page, baseURL, balance = 100) {
     id: 9,
     amounts: state.order?.supplementAmount,
     paymentState: state.order?.paymentState,
+    canClose: state.order?.paymentState === 'PENDING',
     businessType: 'MEMBERSHIP_TOPUP',
     membershipOrder: state.order,
   })
@@ -207,6 +208,7 @@ test('failed purchase preserves selection and a pending order survives refresh a
   await page.reload()
   await expect(page.getByRole('button', { name: '继续支付' })).toBeVisible()
   await page.getByRole('button', { name: '取消订单', exact: true }).click()
+  await page.getByRole('button', { name: '确认关单', exact: true }).click()
   await expect(page.locator('.pending-membership')).toHaveCount(0)
   expect(state.account.reserved_balance).toBe(0)
   expect(state.account.available_balance).toBe(100)

@@ -17,7 +17,7 @@ import {
 } from '../src/utils/payment-context'
 vi.mock('../src/utils/request', () => ({ default: { get: vi.fn(), post: vi.fn() } }))
 vi.mock('../src/utils/request-error-notice', () => ({
-  feedback: { success: vi.fn() },
+  feedback: { success: vi.fn(), warning: vi.fn() },
   localFailure: vi.fn(),
 }))
 let wrapper, router, store, state
@@ -152,8 +152,10 @@ it('submits the payment form in the same tab once and remembers the owned rechar
   container.appendChild(form)
   wrapper.vm.formContainer = container
   wrapper.vm.payment = { rechargeId: 7 }
+  request.get.mockResolvedValue({ data: { paymentState: "PENDING", canClose: true } })
+  const submitting = wrapper.vm.pay()
   wrapper.vm.pay()
-  wrapper.vm.pay()
+  await submitting
   expect(form.target).toBe('_self')
   expect(form.submit).toHaveBeenCalledTimes(1)
   expect(pendingPayment(1)).toBe(7)
@@ -167,4 +169,17 @@ it('validates return IDs, isolates pending orders by user and allows only a fixe
   rememberPaymentReturn({ rechargeId: '7', redirect: 'https://evil.invalid' })
   expect(consumePaymentReturn()).toBe(paymentPath(7))
   expect(consumePaymentReturn()).toBe(null)
+})
+
+it('refuses to submit a cached form after another page closed its order', async () => {
+  await setup(UserAccount)
+  const form=document.createElement('form')
+  form.action='https://openapi-sandbox.dl.alipaydev.com/gateway.do'
+  form.submit=vi.fn()
+  const container=document.createElement('div');container.appendChild(form)
+  wrapper.vm.formContainer=container;wrapper.vm.payment={rechargeId:7}
+  request.get.mockResolvedValue({data:{paymentState:'CLOSED',canClose:false}})
+  await wrapper.vm.pay()
+  expect(form.submit).not.toHaveBeenCalled()
+  expect(feedback.warning).toHaveBeenCalledWith('充值单已关闭，不能继续支付')
 })

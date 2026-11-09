@@ -94,10 +94,52 @@ class PaymentLifecycleIntegrationTest {
         assertEquals("CLOSED",payments.status(user,id).paymentState());balance("20");
     }
     @Test void cancellationCannotClaimThatAnUncreatedProviderTradeWasClosed() throws Exception {
-        int id=create();assertEquals("CLOSING",payments.cancel(user,id).paymentState());
-        assertEquals(0,db.queryForObject("select flag from recharges where id=?",Integer.class,id));
+        int id=create();assertEquals("CLOSED",payments.cancel(user,id).paymentState());
+        verify(alipay,never()).query(anyString());
+        verify(alipay,never()).close(anyString());
+        assertEquals(2,db.queryForObject("select flag from recharges where id=?",Integer.class,id));
         clock.advance(11);when(alipay.query(no(id))).thenReturn(paid(id));payments.check(user,id);
         balance("30");assertEquals("PAID",payments.status(user,id).paymentState());
+    }
+    @Test void localClosePreservesAnActiveLeaseAndStaleFailureCannotReopenIt() throws Exception {
+        int id=create();var started=new CountDownLatch(1);var release=new CountDownLatch(1);
+        when(alipay.query(no(id))).thenAnswer(invocation->{started.countDown();assertTrue(release.await(10,TimeUnit.SECONDS));throw new java.net.SocketTimeoutException("sensitive response must not be logged");});
+        var pool=Executors.newSingleThreadExecutor();
+        try {
+            var worker=pool.submit(()->payments.check(user,id));assertTrue(started.await(5,TimeUnit.SECONDS));
+            var event=db.queryForMap("select * from payment_event where recharge_id=?",id);
+            assertThrows(IllegalArgumentException.class,()->payments.cancel(user+99999,id));
+            assertEquals("CLOSED",payments.cancel(user,id).paymentState());payments.cancel(user,id);
+            var after=db.queryForMap("select * from payment_event where recharge_id=?",id);
+            assertEquals(event.get("lease_token"),after.get("lease_token"));assertEquals(event.get("lease_until"),after.get("lease_until"));
+            assertEquals(((Number)event.get("version")).longValue()+1,((Number)after.get("version")).longValue());
+            payments.process(id,((Number)after.get("version")).longValue(),true);verify(alipay,times(1)).query(no(id));
+            release.countDown();worker.get(5,TimeUnit.SECONDS);
+            assertEquals("CLOSED",payments.status(user,id).paymentState());
+            assertNull(db.queryForObject("select completed_at from payment_event where recharge_id=?",Object.class,id));
+            clock.advance(31);doReturn(paid(id)).when(alipay).query(no(id));payments.process(id,null,true);
+            payments.confirm(notification(id));balance("30");
+        } finally {release.countDown();pool.shutdownNow();}
+    }
+    @Test void historicalReviewAndPendingCancellationRecoverWithoutInventingChannelClosure() throws Exception {
+        for(int flag:List.of(0,2)) {
+            int id=create();db.update("update recharges set flag=?,payment_state='REVIEW',cancel_requested=true,expires_at=null,create_time=? where id=?",flag,LocalDateTime.now(clock).minusDays(10),id);
+            payments.recoverLegacy();assertEquals("CLOSED",payments.status(user,id).paymentState());
+            assertFalse(payments.status(user,id).canClose());assertNull(payments.status(user,id).expiresAt());
+            payments.process(id,null,true);
+            assertNull(db.queryForObject("select completed_at from payment_event where recharge_id=?",Object.class,id));
+            assertNotEquals("CLOSED",db.queryForObject("select payment_state from recharges where id=?",String.class,id));
+        }
+        balance("20");
+    }
+    @Test void closeTimeoutStillReleasesExpiredMembershipAndCreditsLatePaymentOnlyOnce() throws Exception {
+        var order=member("MONTHLY","100");clock.advance(1801);
+        when(alipay.query(no(order.rechargeId()))).thenReturn(new PaymentTrade(no(order.rechargeId()),null,"WAIT_BUYER_PAY",order.supplementAmount(),null));
+        when(alipay.close(no(order.rechargeId()))).thenThrow(new com.alipay.api.AlipayApiException(new java.net.SocketTimeoutException("private")));
+        assertEquals("CLOSED",payments.check(user,order.rechargeId()).paymentState());reserved("0");balance("100");
+        assertNull(db.queryForObject("select completed_at from payment_event where recharge_id=?",Object.class,order.rechargeId()));
+        payments.confirm(memberNotification(order));payments.confirm(memberNotification(order));balance("188");
+        assertEquals("CLOSED",payments.status(user,order.rechargeId()).membershipOrder().state());
     }
     @Test void paymentWinningAClosingRaceIsCredited() throws Exception {
         int id=create();clock.advance(1801);
@@ -113,8 +155,9 @@ class PaymentLifecycleIntegrationTest {
     }
     @Test void providerFailureRemainsUnconfirmedAndKeepsTheDurableTask() throws Exception {
         int id=create();clock.advance(1800);when(alipay.query(no(id))).thenThrow(new com.alipay.api.AlipayApiException("test-only"));
-        assertEquals("VERIFYING",payments.check(user,id).paymentState());
-        assertEquals(0,db.queryForObject("select flag from recharges where id=?",Integer.class,id));
+        assertEquals("CLOSED",payments.check(user,id).paymentState());
+        assertEquals("VERIFYING",db.queryForObject("select payment_state from recharges where id=?",String.class,id));
+        assertEquals(2,db.queryForObject("select flag from recharges where id=?",Integer.class,id));
         assertNull(db.queryForObject("select completed_at from payment_event where recharge_id=?",Object.class,id));balance("20");
     }
     @Test void amountMismatchDoesNotCreditAndUniqueTradeFailureRollsBackBalance() throws Exception {
@@ -166,8 +209,8 @@ class PaymentLifecycleIntegrationTest {
     @Test @EnabledIfEnvironmentVariable(named="PARKING_PAYMENT_RECOVERY_TESTS",matches="true")
     void redisRestartRestoresAnInterruptedPayment() throws Exception {
         String project=System.getenv("PARKING_COMPOSE_PROJECT");
-        assertTrue(Set.of("parking-payment-verification","parking-membership-verification").contains(project));
-        int id=create();when(alipay.query(no(id))).thenReturn(paid(id));
+        assertTrue(Set.of("parking-payment-verification","parking-membership-verification","parking-ai-state-verification").contains(project));
+        int id=create();payments.cancel(user,id);when(alipay.query(no(id))).thenReturn(paid(id));
         db.update("update payment_event set next_run_at=?,lease_token='crashed',lease_until=? where recharge_id=?",LocalDateTime.now(clock),LocalDateTime.now(clock).plusSeconds(1),id);
         long generation=db.queryForObject("select version from payment_event where recharge_id=?",Long.class,id);
         redis.<String>getDeque(PaymentQueue.PROCESSING).add(id+":"+generation);
@@ -257,7 +300,7 @@ class PaymentLifecycleIntegrationTest {
     }
     @Test void membershipCloseReleasesReservationAndLatePaymentOnlyCreditsWallet() {
         var order=member("MONTHLY","100");
-        payments.cancel(user,order.rechargeId());reserved("100");
+        payments.cancel(user,order.rechargeId());reserved("0");
         clock.advance(1801);assertEquals("CLOSED",payments.check(user,order.rechargeId()).paymentState());
         reserved("0");balance("100");users.deductions(user,new BigDecimal("100"));
         payments.confirm(memberNotification(order));payments.confirm(memberNotification(order));
@@ -271,8 +314,7 @@ class PaymentLifecycleIntegrationTest {
         var notice=new HashMap<>(memberNotification(closed));notice.put("trade_status","TRADE_CLOSED");
         payments.confirm(notice);reserved("0");payments.confirm(notice);balance("100");
         var winner=membership.create(user,"MONTHLY",UUID.randomUUID().toString());
-        when(alipay.query(no(winner.rechargeId()))).thenReturn(new PaymentTrade(no(winner.rechargeId()),null,"WAIT_BUYER_PAY",winner.supplementAmount(),null),memberPaid(winner));
-        when(alipay.close(no(winner.rechargeId()))).thenReturn(false);
+        payments.confirm(memberNotification(winner));
         assertEquals("SUCCEEDED",payments.cancel(user,winner.rechargeId()).membershipOrder().state());
         reserved("0");balance("0");
     }

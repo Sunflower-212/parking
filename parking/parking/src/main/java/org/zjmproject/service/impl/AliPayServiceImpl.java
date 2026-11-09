@@ -22,6 +22,7 @@ public class AliPayServiceImpl implements AliPayService {
     private static final String GATEWAY = "https://openapi-sandbox.dl.alipaydev.com/gateway.do";
     @Autowired private AliPayConfig config;
     @Autowired private RechargesMapper recharges;
+    @Autowired private Clock clock = Clock.system(ZoneId.of("Asia/Shanghai"));
     protected AlipayClient client() {
         var client=new DefaultAlipayClient(GATEWAY,config.getAppId(),config.getAppPrivateKey(),
                 "JSON","UTF-8",config.getAlipayPublicKey(),"RSA2");
@@ -30,7 +31,7 @@ public class AliPayServiceImpl implements AliPayService {
     }
     @Override public FormContent<String> pay(Integer id) {
         var charge=recharges.findRechargesById(id);
-        if(charge==null || charge.getFlag()!=0 || !"PENDING".equals(charge.getPayment_state()))
+        if(charge==null || charge.getFlag()!=0 || !"PENDING".equals(charge.getPayment_state()) || charge.getExpires_at()==null || !charge.getExpires_at().isAfter(LocalDateTime.now(clock)))
             throw new IllegalStateException("充值单不可支付，请重新创建");
         var content=new JSONObject();
         content.put("out_trade_no",charge.getMerchant_order_no());
@@ -44,6 +45,7 @@ public class AliPayServiceImpl implements AliPayService {
         request.setReturnUrl(config.getReturnUrl()+(config.getReturnUrl().contains("?")?"&":"?")+"rechargeId="+id);
         try {
             var result=new FormContent<>(client().pageExecute(request).getBody(),"text/html;charset=UTF-8",charge.getAmounts(),id,subject);
+            if(recharges.findRechargesById(id).getFlag()!=0) throw new IllegalStateException("充值单已结束，不能继续支付");
             result.setMerchantOrderNo(charge.getMerchant_order_no()); result.setExpiresAt(charge.getExpires_at());
             return result;
         } catch(AlipayApiException e) { throw new IllegalStateException("生成支付页面失败，请稍后重试"); }
@@ -63,7 +65,7 @@ public class AliPayServiceImpl implements AliPayService {
         var result=client().execute(request);
         if(!result.isSuccess()) {
             if("ACQ.TRADE_NOT_EXIST".equals(result.getSubCode())) return new PaymentTrade(orderNo,null,"NOT_FOUND",null,null);
-            throw new AlipayApiException("PAYMENT_QUERY_FAILED");
+            throw org.zjmproject.service.PaymentProviderFailure.response(result.getCode(),result.getSubCode());
         }
         return new PaymentTrade(result.getOutTradeNo(),result.getTradeNo(),result.getTradeStatus(),
                 result.getTotalAmount()==null?null:new BigDecimal(result.getTotalAmount()),
@@ -75,6 +77,6 @@ public class AliPayServiceImpl implements AliPayService {
         var result=client().execute(request);
         if(result.isSuccess()) return true;
         if(Set.of("ACQ.TRADE_NOT_EXIST","ACQ.TRADE_HAS_SUCCESS","ACQ.TRADE_STATUS_ERROR").contains(Objects.toString(result.getSubCode(),""))) return false;
-        throw new AlipayApiException("PAYMENT_CLOSE_FAILED");
+        throw org.zjmproject.service.PaymentProviderFailure.response(result.getCode(),result.getSubCode());
     }
 }
