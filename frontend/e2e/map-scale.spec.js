@@ -101,7 +101,7 @@ for (const count of [1000, 10000]) {
     const sorted = [...samples].sort((a, b) => a - b),
       p95 = sorted[Math.ceil(sorted.length * 0.95) - 1]
     writeFileSync(
-      `../../.work/map-${count}-performance.json`,
+      `../.work/map-${count}-performance.json`,
       JSON.stringify(
         {
           count,
@@ -122,7 +122,7 @@ for (const count of [1000, 10000]) {
       await expect
         .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
         .toBe(true)
-      await page.screenshot({ path: `../../.work/ui/map-${count}-${width}.png`, fullPage: true })
+      await page.screenshot({ path: `../.work/ui/map-${count}-${width}.png`, fullPage: true })
     }
     await page.getByPlaceholder('搜索位置名称').fill(`P${count}`)
     await page.getByRole('button', { name: '选择', exact: true }).last().click()

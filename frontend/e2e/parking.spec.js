@@ -119,7 +119,7 @@ test('super administrator can search and sees validated user forms', async ({ pa
       .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
       .toBe(true)
     await page.screenshot({
-      path: `../../.work/ui/admin-${width}.png`,
+      path: `../.work/ui/admin-${width}.png`,
       fullPage: true,
       animations: 'disabled',
     })
@@ -226,7 +226,7 @@ test('map editor previews, undoes, saves atomically and retains a conflicting dr
     await expect
       .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
       .toBe(true)
-    await page.screenshot({ path: `../../.work/ui/map-editor-${width}.png`, fullPage: true })
+    await page.screenshot({ path: `../.work/ui/map-editor-${width}.png`, fullPage: true })
   }
   await page.route(
     '**/api/spaces/layout/batch',
@@ -355,7 +355,7 @@ test('user reserves once, cancels, and sees responsive pages and current account
       .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
       .toBe(true)
     await page.screenshot({
-      path: `../../.work/ui/user-${width}.png`,
+      path: `../.work/ui/user-${width}.png`,
       fullPage: true,
       animations: 'disabled',
     })

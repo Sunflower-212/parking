@@ -1,7 +1,9 @@
 // Only operates on the isolated verification stack and its synthetic administrator login.
 import { createRequire } from 'node:module'
+import { fileURLToPath } from 'node:url'
+process.chdir(fileURLToPath(new URL('../', import.meta.url)))
 import { readFileSync, writeFileSync } from 'node:fs'
-const require = createRequire(new URL('../vue3/parking-vue/package.json', import.meta.url))
+const require = createRequire(new URL('../frontend/package.json', import.meta.url))
 const { chromium } = require('@playwright/test')
 const label = process.argv[2] || 'candidate'
 if (!/^[a-z-]+$/.test(label)) throw new Error('Invalid result label')

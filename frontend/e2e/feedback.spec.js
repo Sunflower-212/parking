@@ -62,7 +62,7 @@ test('login failures stay at the top at three widths with expandable and copyabl
     await expect(page.getByText('请求 ID：notice-login')).not.toBeVisible()
     await message.getByText('查看详情', { exact: true }).click()
     await expect(message.getByText('请求 ID：notice-login')).toBeVisible()
-    await page.screenshot({ path: `../../.work/ui/feedback-login-${width}.png`, fullPage: true })
+    await page.screenshot({ path: `../.work/ui/feedback-login-${width}.png`, fullPage: true })
     await expect(message.locator('.el-alert__icon')).toBeVisible()
     await message.getByRole('button', { name: '复制请求 ID' }).click()
     await expect

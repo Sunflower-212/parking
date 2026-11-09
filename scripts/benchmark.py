@@ -17,7 +17,7 @@ def command(args,**kwargs):
         if exc.stderr:print(exc.stderr.decode(errors='replace')[-1800:])
         raise
 def compose(*args,input=None):
-    return command(['docker','compose','-p','parking-benchmark','--env-file',str(ENV),'-f','compose.benchmark.yml',*args],input=input,stdout=subprocess.PIPE,stderr=subprocess.PIPE).stdout
+    return command(['docker','compose','-p','parking-benchmark','--env-file',str(ENV),'-f','docker/compose.benchmark.yml',*args],input=input,stdout=subprocess.PIPE,stderr=subprocess.PIPE).stdout
 def sql(text):
     return compose('exec','-T','mysql','sh','-c','MYSQL_PWD="$MYSQL_PASSWORD" mysql --default-character-set=utf8mb4 -u"$MYSQL_USER" --batch --raw parking_springboot',input=text.encode())
 def settings():

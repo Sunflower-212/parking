@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test'
 import { mkdirSync } from 'node:fs'
 const base = process.env.E2E_APP_BASE || '/'
-const evidence = process.env.E2E_AI_EVIDENCE_DIR || '../../.work/ai-floating-v1/screenshots'
+const evidence = process.env.E2E_AI_EVIDENCE_DIR || '../.work/ai-floating-v1/screenshots'
 mkdirSync(evidence, { recursive: true })
 const markdownAnswer = `## 最近7天经营情况
 

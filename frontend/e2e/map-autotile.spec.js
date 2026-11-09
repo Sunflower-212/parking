@@ -4,7 +4,7 @@ import { resolve } from 'node:path'
 import { CELL, fitView } from '../src/utils/map-geometry.js'
 
 const appBase = process.env.E2E_APP_BASE || '/'
-const evidence = resolve(process.env.E2E_MAP_EVIDENCE_DIR || '../../.work/autotile-verify')
+const evidence = resolve(process.env.E2E_MAP_EVIDENCE_DIR || '../.work/autotile-verify')
 mkdirSync(evidence, { recursive: true })
 const directions = [
   [-1, 0],

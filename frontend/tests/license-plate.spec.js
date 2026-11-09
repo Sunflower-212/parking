@@ -12,7 +12,7 @@ import {
   normalizePlate,
 } from '../src/utils/license-plate'
 const cases = JSON.parse(
-  readFileSync('../../parking/parking/src/test/resources/license-plates.json', 'utf8'),
+  readFileSync('../backend/src/test/resources/license-plates.json', 'utf8'),
 )
 let wrapper
 const mountPlate = (value = '') =>

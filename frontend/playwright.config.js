@@ -4,8 +4,8 @@ export default defineConfig({
   fullyParallel: false,
   workers: 1,
   timeout: 45000,
-  outputDir: '../../.work/playwright-results',
-  reporter: [['list'], ['json', { outputFile: '../../.work/playwright-report.json' }]],
+  outputDir: '../.work/playwright-results',
+  reporter: [['list'], ['json', { outputFile: '../.work/playwright-report.json' }]],
   use: {
     baseURL: process.env.E2E_BASE_URL || 'http://127.0.0.1:28088',
     browserName: 'chromium',

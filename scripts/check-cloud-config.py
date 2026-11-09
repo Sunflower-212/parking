@@ -91,7 +91,7 @@ def main():
         return 1
     try:
         result = subprocess.run(['docker', 'compose', '--env-file', args.env_file,
-                                 '-f', 'compose.cloud.yml', 'config', '--format', 'json'],
+                                 '-f', 'docker/compose.cloud.yml', 'config', '--format', 'json'],
                                 cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                 universal_newlines=True, encoding='utf-8', timeout=30)
         if result.returncode:

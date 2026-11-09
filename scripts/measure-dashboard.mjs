@@ -1,11 +1,13 @@
 // Counts a complete cold-cache dashboard page in parking-verification only.
 import { createRequire } from 'node:module'
+import { fileURLToPath } from 'node:url'
+process.chdir(fileURLToPath(new URL('../', import.meta.url)))
 import { readFileSync, writeFileSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
-const require = createRequire(new URL('../vue3/parking-vue/package.json', import.meta.url))
+const require = createRequire(new URL('../frontend/package.json', import.meta.url))
 const { chromium } = require('@playwright/test')
 const env = Object.fromEntries(readFileSync('.env', 'utf8').split(/\r?\n/).filter(line => line && !line.startsWith('#') && line.includes('=')).map(line => [line.slice(0, line.indexOf('=')), line.slice(line.indexOf('=') + 1)]))
-const compose = ['compose', '-p', 'parking-verification', '-f', 'compose.test.yml']
+const compose = ['compose', '--env-file', '.env', '-p', 'parking-verification', '-f', 'docker/compose.test.yml']
 function snapshot() {
   const input = "SELECT DIGEST,DIGEST_TEXT,COUNT_STAR FROM performance_schema.events_statements_summary_by_digest WHERE SCHEMA_NAME='parking_springboot' AND DIGEST_TEXT LIKE 'SELECT %';"
   const output = execFileSync('docker', [...compose, 'exec', '-T', 'mysql', 'sh', '-c', 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql -uroot --batch --raw --skip-column-names parking_springboot'], { input, encoding: 'utf8' })

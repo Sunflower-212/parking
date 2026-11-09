@@ -12,7 +12,7 @@ if __name__=='__main__':
     if not re.fullmatch(r'parking(?:-[a-z0-9]+)*',args.project):parser.error('Expected a parking Compose project')
     running=subprocess.check_output(['docker','ps','-q','--filter',f'label=com.docker.compose.project={args.project}','--filter','label=com.docker.compose.service=backend'],cwd=ROOT).decode().strip()
     if running:raise SystemExit('Stop all backend writers before migration. No schema or data changed.')
-    base=['docker','compose','-p',args.project,'-f','compose.yml','exec','-T','mysql','sh','-c']
+    base=['docker','compose','--env-file',str(ROOT / '.env'),'-p',args.project,'-f','compose.yml','exec','-T','mysql','sh','-c']
     folder=ROOT/'.work/backups';folder.mkdir(parents=True,exist_ok=True)
     backup=folder/f'{args.project}-{time.strftime("%Y%m%d-%H%M%S")}-{uuid.uuid4().hex[:6]}.sql.gz'
     process=subprocess.Popen(base+['MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec mysqldump -uroot --no-tablespaces --single-transaction --routines --triggers parking_springboot'],cwd=ROOT,stdout=subprocess.PIPE,stderr=subprocess.PIPE)

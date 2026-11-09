@@ -1,9 +1,9 @@
 FROM maven:3.9.11-eclipse-temurin-17 AS build
 WORKDIR /build
-COPY parking/parking/.mvn .mvn
-COPY parking/parking/pom.xml pom.xml
+COPY backend/.mvn .mvn
+COPY backend/pom.xml pom.xml
 RUN mvn -q -B dependency:go-offline
-COPY parking/parking/src src
+COPY backend/src src
 RUN mvn -q -B -DskipTests package
 
 FROM eclipse-temurin:17.0.14_7-jre-jammy

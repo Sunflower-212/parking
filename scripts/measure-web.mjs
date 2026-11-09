@@ -1,8 +1,10 @@
 // Read-only browser performance probe. Uses a fresh browser context for each sample.
 import { createRequire } from 'node:module'
+import { fileURLToPath } from 'node:url'
+process.chdir(fileURLToPath(new URL('../', import.meta.url)))
 import { gzipSync } from 'node:zlib'
 import { writeFileSync, mkdirSync } from 'node:fs'
-const require = createRequire(new URL('../vue3/parking-vue/package.json', import.meta.url))
+const require = createRequire(new URL('../frontend/package.json', import.meta.url))
 const { chromium } = require('@playwright/test')
 const [label = 'optimized', base = 'http://127.0.0.1:28088'] = process.argv.slice(2)
 mkdirSync('.work/ui', { recursive: true })

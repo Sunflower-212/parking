@@ -3,7 +3,7 @@ import { mkdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 const base = `${(process.env.E2E_APP_BASE || '').replace(/\/$/, '')}/`
-const evidence = resolve('../../.work/payment-lifecycle/ui')
+const evidence = resolve('../.work/payment-lifecycle/ui')
 mkdirSync(evidence, { recursive: true })
 const token = `e30.${Buffer.from(JSON.stringify({ claims: { id: 1, permissions: -1, username: 'payment-fixture' }, exp: Math.floor(Date.now() / 1000) + 3600 })).toString('base64url')}.fixture`
 async function setup(page, { loggedIn = true, providerUnavailable = false } = {}) {

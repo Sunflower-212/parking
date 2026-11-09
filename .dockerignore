@@ -14,6 +14,10 @@
 **/*.zip
 **/*.pem
 **/*.key
+docker/gateway/certs
+docker/gateway/servers/https.conf
+deploy/gateway/certs
+deploy/gateway/servers/https.conf
 .cache
 .work
 docs

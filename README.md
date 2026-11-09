@@ -21,6 +21,27 @@
 
 外部服务默认关闭，不需要第三方密钥即可启动核心系统。图片识别出入场、真实充值、云头像上传等功能需要启用对应服务。微信支付尚未接入，不提供模拟到账。
 
+## 项目结构
+
+```text
+backend/          Spring Boot 源码、后端测试和 Maven Wrapper
+frontend/         Vue 源码、组件测试和浏览器测试
+docker/           Dockerfile、各环境 Compose 和容器配置
+  nginx/          前端 Nginx 配置
+  rabbitmq/       RabbitMQ 配置
+  gateway/        独立公共入口的 Compose、Nginx 路由及配置示例
+database/         全新初始化脚本和增量迁移
+scripts/          启动、配置检查、迁移、发布校验和测试工具
+.github/          GitHub CI
+compose.yml       默认完整启动配置
+.env.example      本地配置示例
+.env.cloud.example 云端配置示例
+```
+
+以下命令均在仓库根目录执行。真实配置统一保存在根目录 `.env`，不要提交到 Git。环境 Compose 位于 `docker/`，每次选择一份完整业务配置；`docker/gateway/` 是单独管理的公共入口。默认 `compose.yml` 保留在根目录，支持直接运行 `docker compose up`。
+
+目录整理后，旧的 `parking/parking/`、`vue3/parking-vue/` 分别改为 `backend/`、`frontend/`，IDE 应重新打开对应模块。容器项目名、数据卷和业务配置不变；已有服务器的旧部署包不需要仅为目录变化而更新。
+
 ## Docker 快速启动
 
 安装并启动 Docker Desktop（Linux 容器模式），然后在仓库根目录运行：
@@ -46,7 +67,7 @@ docker compose down
 
 ## 阿里云部署：全部服务与 /parking/
 
-开发环境使用完整的 `compose.dev.yml`，隔离验收使用 `compose.test.yml`，云端使用 `compose.cloud.yml`；每次业务启动只选择一份文件，不叠加多个环境。公共 Nginx 入口保持独立，避免停车系统停止时影响同机其他应用。历史专项压测配置单独保留。
+开发环境使用完整的 `docker/compose.dev.yml`，隔离验收使用 `docker/compose.test.yml`，云端使用 `docker/compose.cloud.yml`；每次业务启动只选择一份文件，不叠加多个环境。公共 Nginx 入口保持独立，避免停车系统停止时影响同机其他应用。历史专项压测配置单独保留。
 
 云端启用 DeepSeek、百度 OCR、支付宝沙箱、OSS 和 RabbitMQ。镜像不包含密钥，先生成服务器自己的环境文件并填齐凭据：
 
@@ -56,7 +77,7 @@ python3 scripts/init-env.py --cloud
 python3 scripts/check-cloud-config.py
 docker network create web-entry
 sh scripts/start-cloud.sh
-docker compose -p web-entry -f deploy/gateway/compose.yml up -d --pull never
+docker compose --env-file .env -p web-entry -f docker/gateway/compose.yml up -d --pull never
 ```
 
 共享网络已存在时复用，不要删除重建。离线包须先 `docker load`；启动脚本只使用本地镜像。访问 `http://服务器IP/parking`；HTTPS 需另行配置有效域名和证书，443 端口映射本身不代表 TLS 已启用。
@@ -77,7 +98,7 @@ Windows 示例：
 
 ```powershell
 python scripts/init-env.py
-docker compose -p parking -f compose.dev.yml up -d --wait mysql redis redis-cache
+docker compose --env-file .env -p parking -f docker/compose.dev.yml up -d --wait mysql redis redis-cache
 # 使用你实际安装的 JDK 17；仅影响当前终端
 $env:JAVA_HOME = 'D:\Program Files\Java\jdk17.0.20'
 $env:PATH = "$env:JAVA_HOME\bin;$env:PATH"
@@ -90,14 +111,14 @@ $env:REDIS_PORT = '6380'
 $env:CACHE_ENABLED = 'true'
 $env:CACHE_LOCAL_ENABLED = 'true'
 $env:CACHE_REDIS_PORT = '6381'
-cd parking/parking
+cd backend
 .\mvnw.cmd spring-boot:run
 ```
 
 在另一终端启动前端：
 
 ```sh
-cd vue3/parking-vue
+cd frontend
 npm ci
 npm run dev
 ```
@@ -126,6 +147,6 @@ Windows 下完整验证：
 
 ## 配置与隐私
 
-实际 `application.yml`、`.env`、DeepSeek 密钥文件、IDE 数据源配置、压缩包、日志和构建产物均被排除。仓库提供 `.env.example`、后端 `application-example.yml` 和 `parking/deepseek-api_key.example.txt`。
+实际 `application.yml`、`.env`、DeepSeek 密钥文件、IDE 数据源配置、压缩包、日志和构建产物均被排除。仓库提供 `.env.example`、后端 `application-example.yml` 和 `backend/deepseek-api_key.example.txt`。
 
 Docker 构建同样排除真实配置，运行时注入环境变量。请在本地保存真实配置；公开仓库和镜像构建上下文不需要这些文件。

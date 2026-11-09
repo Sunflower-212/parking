@@ -52,7 +52,7 @@ test('superadmin filters, paginates, inspects, copies and resets audit records a
     await expect
       .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
       .toBe(true)
-    await page.screenshot({ path: `../../.work/ui/audit-detail-${width}.png`, fullPage: true })
+    await page.screenshot({ path: `../.work/ui/audit-detail-${width}.png`, fullPage: true })
   }
   await page.keyboard.press('Escape')
   await page.getByRole('button', { name: '重置', exact: true }).click()
@@ -62,7 +62,7 @@ test('superadmin filters, paginates, inspects, copies and resets audit records a
     await expect
       .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
       .toBe(true)
-    await page.screenshot({ path: `../../.work/ui/audit-page-${width}.png`, fullPage: true })
+    await page.screenshot({ path: `../.work/ui/audit-page-${width}.png`, fullPage: true })
   }
   expect(errors).toEqual([])
 })

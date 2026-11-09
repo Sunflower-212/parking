@@ -5,14 +5,14 @@ import subprocess
 import uuid
 
 p = argparse.ArgumentParser()
-p.add_argument('--compose-file', default='compose.test.yml')
+p.add_argument('--compose-file', default='docker/compose.test.yml')
 p.add_argument('--project', default='parking-verification')
 args = p.parse_args()
 if not args.project.startswith('parking-') or 'verification' not in args.project:
     raise SystemExit('An isolated parking verification project is required')
 root = Path(__file__).resolve().parents[1]
 database = 'parking_ai_' + uuid.uuid4().hex[:12]
-command = ['docker', 'compose', '-p', args.project, '-f', args.compose_file,
+command = ['docker', 'compose', '--env-file', str(root / '.env'), '-p', args.project, '-f', args.compose_file,
            'exec', '-T', 'mysql', 'sh', '-c',
            'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec mysql -uroot --default-character-set=utf8mb4 -N -B']
 

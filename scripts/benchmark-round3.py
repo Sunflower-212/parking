@@ -79,7 +79,7 @@ if __name__=='__main__':
         values=bench.settings();values.setdefault('BENCH_RABBIT_PASSWORD',secrets.token_hex(24))
         bench.ENV.write_text('\n'.join(f'{k}={v}' for k,v in values.items())+'\n')
         def background_compose(*arguments,input=None):
-            return bench.command(['docker','compose','-p','parking-benchmark','--env-file',str(bench.ENV),'-f','compose.benchmark.yml','-f','compose.benchmark.background.yml','--profile','background',*arguments],input=input,stdout=bench.subprocess.PIPE,stderr=bench.subprocess.PIPE).stdout
+            return bench.command(['docker','compose','-p','parking-benchmark','--env-file',str(bench.ENV),'-f','docker/compose.benchmark.yml','-f','docker/compose.benchmark.background.yml','--profile','background',*arguments],input=input,stdout=bench.subprocess.PIPE,stderr=bench.subprocess.PIPE).stdout
         bench.compose=background_compose;k6.SERVICES.append('rabbitmq')
     args.version='candidate';args.local=True;args.index=False;args.mode='mixed'
     k6.choose=lambda *unused:choose(args)

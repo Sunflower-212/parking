@@ -30,7 +30,7 @@ services:
     - --max-execution-time=5000
     volumes:
     - mysql-data:/var/lib/mysql
-    - ./database/init:/docker-entrypoint-initdb.d:ro
+    - ../database/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test:
       - CMD-SHELL
@@ -198,7 +198,7 @@ services:
     - 127.0.0.1:${RABBITMQ_MANAGEMENT_PORT:-15672}:15672
     volumes:
     - rabbitmq-data:/var/lib/rabbitmq
-    - ./deploy/rabbitmq/cloud.conf:/etc/rabbitmq/rabbitmq.conf:ro,Z
+    - ./rabbitmq/cloud.conf:/etc/rabbitmq/rabbitmq.conf:ro,Z
     healthcheck:
       test:
       - CMD

@@ -1,6 +1,6 @@
 # 停车管理系统前端
 
-Vue 3 + Vite。项目启动、部署及配置说明请查看仓库根目录 README 和 docs 中的中文手册。
+Vue 3 + Vite。项目启动、部署及配置说明请查看[仓库根目录 README](../README.md)。
 
 ```sh
 npm ci

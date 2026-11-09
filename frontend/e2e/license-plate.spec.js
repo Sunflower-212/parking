@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test'
 import { mkdirSync } from 'node:fs'
 const base = process.env.E2E_APP_BASE || '/'
-const evidence = process.env.E2E_PLATE_EVIDENCE_DIR || '../../.work/plate-input-v1/screenshots'
+const evidence = process.env.E2E_PLATE_EVIDENCE_DIR || '../.work/plate-input-v1/screenshots'
 mkdirSync(evidence, { recursive: true })
 async function setup(page, plate = '皖H-88888', admin = false) {
   const token = [

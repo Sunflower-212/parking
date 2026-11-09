@@ -14,7 +14,7 @@ env = dict(line.split('=', 1) for line in (root / '.env').read_text(encoding='ut
 project = os.environ.get('PARKING_COMPOSE_PROJECT', 'parking')
 if project not in ('parking', 'parking-verification'):
     raise SystemExit('Smoke tests support only parking or parking-verification')
-compose_files = ['-f', 'compose.test.yml' if project == 'parking-verification' else 'compose.dev.yml']
+compose_files = ['-f', 'docker/compose.test.yml' if project == 'parking-verification' else 'docker/compose.dev.yml']
 base = 'http://127.0.0.1:' + ('28088' if project == 'parking-verification' else env.get('HTTP_PORT', '8088'))
 prefix = 'sm' + uuid.uuid4().hex[:8]
 
@@ -33,10 +33,10 @@ def api(path, token=None, body=None, method='GET', form=False):
     return result.get('data')
 
 def compose(*args):
-    subprocess.run(['docker', 'compose', '-p', project, *compose_files, *args], cwd=root, check=True, stdout=subprocess.DEVNULL)
+    subprocess.run(['docker', 'compose', '--env-file', str(root / '.env'), '-p', project, *compose_files, *args], cwd=root, check=True, stdout=subprocess.DEVNULL)
 
 def sql(statement):
-    command = ['docker', 'compose', '-p', project, *compose_files, 'exec', '-T', 'mysql', 'sh', '-c', 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec mysql -uroot --default-character-set=utf8mb4 --batch --skip-column-names parking_springboot']
+    command = ['docker', 'compose', '--env-file', str(root / '.env'), '-p', project, *compose_files, 'exec', '-T', 'mysql', 'sh', '-c', 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec mysql -uroot --default-character-set=utf8mb4 --batch --skip-column-names parking_springboot']
     result = subprocess.run(command, input=statement, encoding='utf-8', cwd=root, capture_output=True, check=True)
     return result.stdout.strip()
 

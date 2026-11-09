@@ -13,7 +13,9 @@
 *.key
 *.p12
 *.pfx
+/docker/gateway/certs/
 /deploy/gateway/certs/
+/docker/gateway/servers/https.conf
 /deploy/gateway/servers/https.conf
 # Local files and generated output
 /docs/

@@ -19,7 +19,7 @@ else:
         ['git', 'diff', '--cached', '--name-only', '--diff-filter=ACMR', '-z'], cwd=root
     ).decode().split('\0') if path]
 known = set()
-for config in [root / '.env', root / 'parking/parking/src/main/resources/application.yml']:
+for config in [root / '.env', root / 'backend/src/main/resources/application.yml']:
     if not config.exists():
         continue
     for line in config.read_text(encoding='utf-8-sig').splitlines():

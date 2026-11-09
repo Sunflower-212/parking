@@ -8,7 +8,7 @@ try {
         if ($_ -match '^([^#=]+)=(.*)$') { [Environment]::SetEnvironmentVariable($Matches[1], $Matches[2], 'Process') }
     }
     if($IncludeRecovery -and !$IncludeBackground){throw 'IncludeRecovery requires IncludeBackground'}
-    $composeArgs=@('compose','-p','parking-verification','-f','compose.test.yml')
+    $composeArgs=@('compose','--env-file','.env','-p','parking-verification','-f','docker/compose.test.yml')
     $infrastructure=@('mysql','redis','redis-cache')
     if($IncludeBackground){$composeArgs+=@('--profile','background');$infrastructure+='rabbitmq'}
     $env:CAPACITY_BUCKETS=[string]$CapacityBuckets
@@ -35,14 +35,14 @@ try {
     $env:TEST_DB_URL = 'jdbc:mysql://127.0.0.1:23307/parking_springboot?serverTimezone=Asia/Shanghai'
     $env:TEST_REDIS_PORT = '26380'
     $env:TEST_CACHE_PORT = '26381'
-    Push-Location parking/parking
+    Push-Location backend
     try { .\mvnw.cmd -B verify; if ($LASTEXITCODE -ne 0) { throw 'Backend verification failed' } }
     finally { Pop-Location }
     python scripts/test-migration.py
     if ($LASTEXITCODE -ne 0) { throw 'Migration verification failed' }
     python scripts/test-membership-migration.py
     if ($LASTEXITCODE -ne 0) { throw 'Membership migration verification failed' }
-    Push-Location vue3/parking-vue
+    Push-Location frontend
     try {
         npm ci
         if ($LASTEXITCODE -ne 0) { throw 'npm ci failed' }
@@ -58,7 +58,7 @@ try {
         docker @composeArgs up -d --build --wait backend frontend
         if ($LASTEXITCODE -ne 0) { throw 'Verification application startup failed' }
         $env:PLAYWRIGHT_BROWSERS_PATH = Join-Path $projectRoot '.work/browsers'
-        Push-Location vue3/parking-vue
+        Push-Location frontend
         try {
             npx playwright install chromium
             if ($LASTEXITCODE -ne 0) { throw 'Browser installation failed' }

@@ -5,7 +5,7 @@ import subprocess
 import uuid
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--compose-file', default='compose.test.yml')
+parser.add_argument('--compose-file', default='docker/compose.test.yml')
 parser.add_argument('--env-file', default='.env')
 parser.add_argument('--project', default='parking-verification')
 args = parser.parse_args()
